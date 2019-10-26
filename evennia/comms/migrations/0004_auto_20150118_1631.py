@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from __future__ import unicode_literals
+
 
 from django.db import models, migrations
 
@@ -13,10 +13,6 @@ def convert_defaults(apps, schema_editor):
 
 class Migration(migrations.Migration):
 
-    dependencies = [
-        ('comms', '0003_auto_20140917_0756'),
-    ]
+    dependencies = [("comms", "0003_auto_20140917_0756")]
 
-    operations = [
-        migrations.RunPython(convert_defaults),
-    ]
+    operations = [migrations.RunPython(convert_defaults)]

@@ -20,6 +20,7 @@ the line is just added to the editor buffer).
 
 from evennia.comms.models import ChannelDB
 from evennia.utils import create
+from evennia.utils.utils import at_search_result
 
 # The command keys the engine is calling
 # (the actual names all start with __)
@@ -30,6 +31,7 @@ from evennia.commands.cmdhandler import CMD_CHANNEL
 from evennia.utils import utils
 
 from django.conf import settings
+
 COMMAND_DEFAULT_CLASS = utils.class_from_module(settings.COMMAND_DEFAULT_CLASS)
 
 # Command called when there is no input at line
@@ -40,6 +42,7 @@ class SystemNoInput(COMMAND_DEFAULT_CLASS):
     """
     This is called when there is no input given
     """
+
     key = CMD_NOINPUT
     locks = "cmd:all()"
 
@@ -56,6 +59,7 @@ class SystemNoMatch(COMMAND_DEFAULT_CLASS):
     """
     No command was found matching the given input.
     """
+
     key = CMD_NOMATCH
     locks = "cmd:all()"
 
@@ -76,63 +80,37 @@ class SystemMultimatch(COMMAND_DEFAULT_CLASS):
     The cmdhandler adds a special attribute 'matches' to this
     system command.
 
-      matches = [(candidate, cmd) , (candidate, cmd), ...],
+      matches = [(cmdname, args, cmdobj, cmdlen, mratio, raw_cmdname) , (cmdname, ...), ...]
 
-    where candidate is an instance of evennia.commands.cmdparser.CommandCandidate
-    and cmd is an an instantiated Command object matching the candidate.
+    Here, `cmdname` is the command's name and `args` the rest of the incoming string,
+    without said command name. `cmdobj` is the Command instance, the cmdlen is
+    the same as len(cmdname) and mratio is a measure of how big a part of the
+    full input string the cmdname takes up - an exact match would be 1.0. Finally,
+    the `raw_cmdname` is the cmdname unmodified by eventual prefix-stripping.
+
     """
+
     key = CMD_MULTIMATCH
     locks = "cmd:all()"
 
-    def format_multimatches(self, caller, matches):
-        """
-        Format multiple command matches to a useful error.
-
-        This is copied directly from the default method in
-        evennia.commands.cmdhandler.
-
-        """
-        string = "There were multiple matches:"
-        for num, match in enumerate(matches):
-            # each match is a tuple (candidate, cmd)
-            candidate, cmd = match
-
-            is_channel = hasattr(cmd, "is_channel") and cmd.is_channel
-            if is_channel:
-                is_channel = " (channel)"
-            else:
-                is_channel = ""
-            is_exit = hasattr(cmd, "is_exit") and cmd.is_exit
-            if is_exit and cmd.destination:
-                is_exit = " (exit to %s)" % cmd.destination
-            else:
-                is_exit = ""
-
-            id1 = ""
-            id2 = ""
-            if not (is_channel or is_exit) and (hasattr(cmd, 'obj') and cmd.obj != caller):
-                # the command is defined on some other object
-                id1 = "%s-" % cmd.obj.name
-                id2 = " (%s-%s)" % (num + 1, candidate.cmdname)
-            else:
-                id1 = "%s-" % (num + 1)
-                id2 = ""
-            string += "\n  %s%s%s%s%s" % (id1, candidate.cmdname, id2, is_channel, is_exit)
-        return string
-
     def func(self):
         """
-        argument to cmd is a comma-separated string of
-        all the clashing matches.
+        Handle multiple-matches by using the at_search_result default handler.
+
         """
-        string = self.format_multimatches(self.caller, self.matches)
-        self.msg(string)
+        # this was set by the cmdparser and is a tuple
+        #    (cmdname, args, cmdobj, cmdlen, mratio, raw_cmdname). See
+        # evennia.commands.cmdparse.create_match for more details.
+        matches = self.matches
+        # at_search_result will itself msg the multimatch options to the caller.
+        at_search_result([match[2] for match in matches], self.caller, query=matches[0][0])
 
 
 # Command called when the command given at the command line
 # was identified as a channel name, like there existing a
 # channel named 'ooc' and the user wrote
 #  > ooc Hello!
+
 
 class SystemSendToChannel(COMMAND_DEFAULT_CLASS):
     """
@@ -145,7 +123,7 @@ class SystemSendToChannel(COMMAND_DEFAULT_CLASS):
     locks = "cmd:all()"
 
     def parse(self):
-        channelname, msg = self.args.split(':', 1)
+        channelname, msg = self.args.split(":", 1)
         self.args = channelname.strip(), msg.strip()
 
     def func(self):
@@ -166,7 +144,7 @@ class SystemSendToChannel(COMMAND_DEFAULT_CLASS):
             string = "You are not connected to channel '%s'."
             caller.msg(string % channelkey)
             return
-        if not channel.access(caller, 'send'):
+        if not channel.access(caller, "send"):
             string = "You are not permitted to send to channel '%s'."
             caller.msg(string % channelkey)
             return

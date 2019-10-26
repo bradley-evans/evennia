@@ -1,15 +1,13 @@
 """
 Sessionhandler for portal sessions
 """
-from __future__ import print_function
-from __future__ import division
+
 
 import time
 from collections import deque, namedtuple
 from twisted.internet import reactor
 from django.conf import settings
-from evennia.server.sessionhandler import SessionHandler, PCONN, PDISCONN, \
-    PCONNSYNC, PDISCONNALL
+from evennia.server.sessionhandler import SessionHandler, PCONN, PDISCONN, PCONNSYNC, PDISCONNALL
 from evennia.utils.logger import log_trace
 
 # module import
@@ -29,7 +27,7 @@ _ERROR_MAX_CHAR = settings.MAX_CHAR_LIMIT_WARNING
 
 _CONNECTION_QUEUE = deque()
 
-DUMMYSESSION = namedtuple('DummySession', ['sessid'])(0)
+DUMMYSESSION = namedtuple("DummySession", ["sessid"])(0)
 
 # -------------------------------------------------------------
 # Portal-SessionHandler class
@@ -53,7 +51,7 @@ class PortalSessionHandler(SessionHandler):
         Init the handler
 
         """
-        super(PortalSessionHandler, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.portal = None
         self.latest_sessid = 0
         self.uptime = time.time()
@@ -90,24 +88,42 @@ class PortalSessionHandler(SessionHandler):
 
         if session:
             # assign if we are first-connectors
-            self.latest_sessid += 1
-            session.sessid = self.latest_sessid
+            if not session.sessid:
+                # if the session already has a sessid (e.g. being inherited in the
+                # case of a webclient auto-reconnect), keep it
+                self.latest_sessid += 1
+                session.sessid = self.latest_sessid
             session.server_connected = False
             _CONNECTION_QUEUE.appendleft(session)
             if len(_CONNECTION_QUEUE) > 1:
-                session.data_out(text=[["%s DoS protection is active. You are queued to connect in %g seconds ..." % (
-                                 settings.SERVERNAME,
-                                 len(_CONNECTION_QUEUE) * _MIN_TIME_BETWEEN_CONNECTS)], {}])
+                session.data_out(
+                    text=[
+                        [
+                            "%s DoS protection is active. You are queued to connect in %g seconds ..."
+                            % (
+                                settings.SERVERNAME,
+                                len(_CONNECTION_QUEUE) * _MIN_TIME_BETWEEN_CONNECTS,
+                            )
+                        ],
+                        {},
+                    ]
+                )
         now = time.time()
-        if (now - self.connection_last < _MIN_TIME_BETWEEN_CONNECTS) or not self.portal.amp_protocol:
+        if (
+            now - self.connection_last < _MIN_TIME_BETWEEN_CONNECTS
+        ) or not self.portal.amp_protocol:
             if not session or not self.connection_task:
-                self.connection_task = reactor.callLater(_MIN_TIME_BETWEEN_CONNECTS, self.connect, None)
+                self.connection_task = reactor.callLater(
+                    _MIN_TIME_BETWEEN_CONNECTS, self.connect, None
+                )
             self.connection_last = now
             return
         elif not session:
             if _CONNECTION_QUEUE:
                 # keep launching tasks until queue is empty
-                self.connection_task = reactor.callLater(_MIN_TIME_BETWEEN_CONNECTS, self.connect, None)
+                self.connection_task = reactor.callLater(
+                    _MIN_TIME_BETWEEN_CONNECTS, self.connect, None
+                )
             else:
                 self.connection_task = None
         self.connection_last = now
@@ -119,9 +135,9 @@ class PortalSessionHandler(SessionHandler):
 
             self[session.sessid] = session
             session.server_connected = True
-            self.portal.amp_protocol.send_AdminPortal2Server(session,
-                                                             operation=PCONN,
-                                                             sessiondata=sessdata)
+            self.portal.amp_protocol.send_AdminPortal2Server(
+                session, operation=PCONN, sessiondata=sessdata
+            )
 
     def sync(self, session):
         """
@@ -141,16 +157,23 @@ class PortalSessionHandler(SessionHandler):
             if self.portal.amp_protocol:
                 # we only send sessdata that should not have changed
                 # at the server level at this point
-                sessdata = dict((key, val) for key, val in sessdata.items() if key in ("protocol_key",
-                                                                                       "address",
-                                                                                       "sessid",
-                                                                                       "csessid",
-                                                                                       "conn_time",
-                                                                                       "protocol_flags",
-                                                                                       "server_data",))
-                self.portal.amp_protocol.send_AdminPortal2Server(session,
-                                                                 operation=PCONNSYNC,
-                                                                 sessiondata=sessdata)
+                sessdata = dict(
+                    (key, val)
+                    for key, val in sessdata.items()
+                    if key
+                    in (
+                        "protocol_key",
+                        "address",
+                        "sessid",
+                        "csessid",
+                        "conn_time",
+                        "protocol_flags",
+                        "server_data",
+                    )
+                )
+                self.portal.amp_protocol.send_AdminPortal2Server(
+                    session, operation=PCONNSYNC, sessiondata=sessdata
+                )
 
     def disconnect(self, session):
         """
@@ -184,6 +207,7 @@ class PortalSessionHandler(SessionHandler):
         """
         Disconnect all sessions, informing the Server.
         """
+
         def _callback(result, sessionhandler):
             # we set a watchdog to stop self.disconnect from deleting
             # sessions while we are looping over them.
@@ -194,8 +218,9 @@ class PortalSessionHandler(SessionHandler):
 
         # inform Server; wait until finished sending before we continue
         # removing all the sessions.
-        self.portal.amp_protocol.send_AdminPortal2Server(DUMMYSESSION,
-                                                         operation=PDISCONNALL).addCallback(_callback, self)
+        self.portal.amp_protocol.send_AdminPortal2Server(
+            DUMMYSESSION, operation=PDISCONNALL
+        ).addCallback(_callback, self)
 
     def server_connect(self, protocol_path="", config=dict()):
         """
@@ -253,7 +278,7 @@ class PortalSessionHandler(SessionHandler):
             reason (str, optional): Motivation for disconnect.
 
         """
-        for session in self.values():
+        for session in list(self.values()):
             session.disconnect(reason)
             del session
         self.clear()
@@ -321,8 +346,11 @@ class PortalSessionHandler(SessionHandler):
             session (list): The matching session, if found.
 
         """
-        return [sess for sess in self.get_sessions(include_unloggedin=True)
-                if hasattr(sess, 'csessid') and sess.csessid and sess.csessid == csessid]
+        return [
+            sess
+            for sess in self.get_sessions(include_unloggedin=True)
+            if hasattr(sess, "csessid") and sess.csessid and sess.csessid == csessid
+        ]
 
     def announce_all(self, message):
         """
@@ -355,7 +383,7 @@ class PortalSessionHandler(SessionHandler):
 
         """
         try:
-            text = kwargs['text']
+            text = kwargs["text"]
             if (_MAX_CHAR_LIMIT > 0) and len(text) > _MAX_CHAR_LIMIT:
                 if session:
                     self.data_out(session, text=[[_ERROR_MAX_CHAR], {}])
@@ -395,8 +423,7 @@ class PortalSessionHandler(SessionHandler):
 
             # relay data to Server
             session.cmd_last = now
-            self.portal.amp_protocol.send_MsgPortal2Server(session,
-                                                           **kwargs)
+            self.portal.amp_protocol.send_MsgPortal2Server(session, **kwargs)
 
     def data_out(self, session, **kwargs):
         """
@@ -418,7 +445,7 @@ class PortalSessionHandler(SessionHandler):
 
         # distribute outgoing data to the correct session methods.
         if session:
-            for cmdname, (cmdargs, cmdkwargs) in kwargs.iteritems():
+            for cmdname, (cmdargs, cmdkwargs) in kwargs.items():
                 funcname = "send_%s" % cmdname.strip().lower()
                 if hasattr(session, funcname):
                     # better to use hassattr here over try..except

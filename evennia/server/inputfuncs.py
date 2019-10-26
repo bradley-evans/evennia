@@ -3,7 +3,8 @@ Functions for processing input commands.
 
 All global functions in this module whose name does not start with "_"
 is considered an inputfunc. Each function must have the following
-callsign:
+callsign (where inputfunc name is always lower-case, no matter what the
+OOB input name looked like):
 
     inputfunc(session, *args, **kwargs)
 
@@ -18,21 +19,21 @@ Evennia knows which modules to use for inputfuncs by
 settings.INPUT_FUNC_MODULES.
 
 """
-from future.utils import viewkeys
 
 import importlib
+from codecs import lookup as codecs_lookup
 from django.conf import settings
 from evennia.commands.cmdhandler import cmdhandler
 from evennia.accounts.models import AccountDB
 from evennia.utils.logger import log_err
-from evennia.utils.utils import to_str, to_unicode
+from evennia.utils.utils import to_str
 
 BrowserSessionStore = importlib.import_module(settings.SESSION_ENGINE).SessionStore
 
 
 # always let "idle" work since we use this in the webclient
 _IDLE_COMMAND = settings.IDLE_COMMAND
-_IDLE_COMMAND = (_IDLE_COMMAND, ) if _IDLE_COMMAND == "idle" else (_IDLE_COMMAND, "idle")
+_IDLE_COMMAND = (_IDLE_COMMAND,) if _IDLE_COMMAND == "idle" else (_IDLE_COMMAND, "idle")
 _GA = object.__getattribute__
 _SA = object.__setattr__
 
@@ -46,6 +47,7 @@ _ERROR_INPUT = "Inputfunc {name}({session}): Wrong/unrecognized input: {inp}"
 
 # All global functions are inputfuncs available to process inputs
 
+
 def text(session, *args, **kwargs):
     """
     Main text input from the client. This will execute a command
@@ -57,8 +59,8 @@ def text(session, *args, **kwargs):
             arguments are ignored.
 
     """
-    #from evennia.server.profiling.timetrace import timetrace
-    #text = timetrace(text, "ServerSession.data_in")
+    # from evennia.server.profiling.timetrace import timetrace
+    # text = timetrace(text, "ServerSession.data_in")
 
     txt = args[0] if args else None
 
@@ -75,11 +77,13 @@ def text(session, *args, **kwargs):
         # nick replacement
         puppet = session.puppet
         if puppet:
-            txt = puppet.nicks.nickreplace(txt,
-                                           categories=("inputline", "channel"), include_account=True)
+            txt = puppet.nicks.nickreplace(
+                txt, categories=("inputline", "channel"), include_account=True
+            )
         else:
-            txt = session.account.nicks.nickreplace(txt,
-                                                    categories=("inputline", "channel"), include_account=False)
+            txt = session.account.nicks.nickreplace(
+                txt, categories=("inputline", "channel"), include_account=False
+            )
     kwargs.pop("options", None)
     cmdhandler(session, txt, callertype="session", session=session, **kwargs)
     session.update_session_counters()
@@ -126,15 +130,33 @@ def default(session, cmdname, *args, **kwargs):
     it will get `cmdname` as the first argument.
 
     """
-    err = "Session {sessid}: Input command not recognized:\n" \
-        " name: '{cmdname}'\n" \
-        " args, kwargs: {args}, {kwargs}".format(sessid=session.sessid,
-                                                 cmdname=cmdname,
-                                                 args=args,
-                                                 kwargs=kwargs)
+    err = (
+        "Session {sessid}: Input command not recognized:\n"
+        " name: '{cmdname}'\n"
+        " args, kwargs: {args}, {kwargs}".format(
+            sessid=session.sessid, cmdname=cmdname, args=args, kwargs=kwargs
+        )
+    )
     if session.protocol_flags.get("INPUTDEBUG", False):
         session.msg(err)
     log_err(err)
+
+
+_CLIENT_OPTIONS = (
+    "ANSI",
+    "XTERM256",
+    "MXP",
+    "UTF-8",
+    "SCREENREADER",
+    "ENCODING",
+    "MCCP",
+    "SCREENHEIGHT",
+    "SCREENWIDTH",
+    "INPUTDEBUG",
+    "RAW",
+    "NOCOLOR",
+    "NOGOAHEAD",
+)
 
 
 def client_options(session, *args, **kwargs):
@@ -163,20 +185,14 @@ def client_options(session, *args, **kwargs):
     old_flags = session.protocol_flags
     if not kwargs or kwargs.get("get", False):
         # return current settings
-        options = dict((key, old_flags[key]) for key in old_flags
-                       if key.upper() in ("ANSI", "XTERM256", "MXP",
-                                          "UTF-8", "SCREENREADER", "ENCODING",
-                                          "MCCP", "SCREENHEIGHT",
-                                          "SCREENWIDTH", "INPUTDEBUG",
-                                          "RAW", "NOCOLOR",
-                                          "NOGOAHEAD"))
+        options = dict((key, old_flags[key]) for key in old_flags if key.upper() in _CLIENT_OPTIONS)
         session.msg(client_options=options)
         return
 
     def validate_encoding(val):
         # helper: change encoding
         try:
-            to_str(to_unicode("test-string"), encoding=val)
+            codecs_lookup(val)
         except LookupError:
             raise RuntimeError("The encoding '|w%s|n' is invalid. " % val)
         return val
@@ -185,12 +201,12 @@ def client_options(session, *args, **kwargs):
         return {0: int(val)}
 
     def validate_bool(val):
-        if isinstance(val, basestring):
+        if isinstance(val, str):
             return True if val.lower() in ("true", "on", "1") else False
         return bool(val)
 
     flags = {}
-    for key, value in kwargs.iteritems():
+    for key, value in kwargs.items():
         key = key.lower()
         if key == "client":
             flags["CLIENTNAME"] = to_str(value)
@@ -223,24 +239,23 @@ def client_options(session, *args, **kwargs):
             flags["RAW"] = validate_bool(value)
         elif key == "nogoahead":
             flags["NOGOAHEAD"] = validate_bool(value)
-        elif key in ('Char 1', 'Char.Skills 1', 'Char.Items 1',
-                     'Room 1', 'IRE.Rift 1', 'IRE.Composer 1'):
+        elif key in (
+            "Char 1",
+            "Char.Skills 1",
+            "Char.Items 1",
+            "Room 1",
+            "IRE.Rift 1",
+            "IRE.Composer 1",
+        ):
             # ignore mudlet's default send (aimed at IRE games)
             pass
         elif key not in ("options", "cmdid"):
-            err = _ERROR_INPUT.format(
-                name="client_settings", session=session, inp=key)
+            err = _ERROR_INPUT.format(name="client_settings", session=session, inp=key)
             session.msg(text=err)
 
     session.protocol_flags.update(flags)
     # we must update the protocol flags on the portal session copy as well
-    session.sessionhandler.session_portal_partial_sync(
-            {session.sessid: {"protocol_flags": flags}})
-
-
-# GMCP alias
-hello = client_options
-supports_set = client_options
+    session.sessionhandler.session_portal_partial_sync({session.sessid: {"protocol_flags": flags}})
 
 
 def get_client_options(session, *args, **kwargs):
@@ -256,8 +271,9 @@ def get_inputfuncs(session, *args, **kwargs):
     it from this module alone since multiple modules could be added.
     So we get it from the sessionhandler.
     """
-    inputfuncsdict = dict((key, func.__doc__) for key, func
-                          in session.sessionhandler.get_inputfuncs().iteritems())
+    inputfuncsdict = dict(
+        (key, func.__doc__) for key, func in session.sessionhandler.get_inputfuncs().items()
+    )
     session.msg(get_inputfuncs=inputfuncsdict)
 
 
@@ -273,6 +289,7 @@ def login(session, *args, **kwargs):
     """
     if not session.logged_in and "name" in kwargs and "password" in kwargs:
         from evennia.commands.default.unloggedin import create_normal_account
+
         account = create_normal_account(session, kwargs["name"], kwargs["password"])
         if account:
             session.sessionhandler.login(session, account)
@@ -282,7 +299,7 @@ _gettable = {
     "name": lambda obj: obj.key,
     "key": lambda obj: obj.key,
     "location": lambda obj: obj.location.key if obj.location else "None",
-    "servername": lambda obj: settings.SERVERNAME
+    "servername": lambda obj: settings.SERVERNAME,
 }
 
 
@@ -312,11 +329,11 @@ def _testrepeat(**kwargs):
         session (Session): Session to return to.
     """
     import time
+
     kwargs["session"].msg(repeat="Repeat called: %s" % time.time())
 
 
-_repeatable = {"test1": _testrepeat,  # example only
-               "test2": _testrepeat}  # "
+_repeatable = {"test1": _testrepeat, "test2": _testrepeat}  # example only  # "
 
 
 def repeat(session, *args, **kwargs):
@@ -337,14 +354,23 @@ def repeat(session, *args, **kwargs):
 
     """
     from evennia.scripts.tickerhandler import TICKER_HANDLER
+
     name = kwargs.get("callback", "")
     interval = max(5, int(kwargs.get("interval", 60)))
 
     if name in _repeatable:
         if kwargs.get("stop", False):
-            TICKER_HANDLER.remove(interval, _repeatable[name], idstring=session.sessid, persistent=False)
+            TICKER_HANDLER.remove(
+                interval, _repeatable[name], idstring=session.sessid, persistent=False
+            )
         else:
-            TICKER_HANDLER.add(interval, _repeatable[name], idstring=session.sessid, persistent=False, session=session)
+            TICKER_HANDLER.add(
+                interval,
+                _repeatable[name],
+                idstring=session.sessid,
+                persistent=False,
+                session=session,
+            )
     else:
         session.msg("Allowed repeating functions are: %s" % (", ".join(_repeatable)))
 
@@ -355,11 +381,7 @@ def unrepeat(session, *args, **kwargs):
     repeat(session, *args, **kwargs)
 
 
-_monitorable = {
-    "name": "db_key",
-    "location": "db_location",
-    "desc": "desc"
-}
+_monitorable = {"name": "db_key", "location": "db_location", "desc": "desc"}
 
 
 def _on_monitor_change(**kwargs):
@@ -367,10 +389,14 @@ def _on_monitor_change(**kwargs):
     obj = kwargs["obj"]
     name = kwargs["name"]
     session = kwargs["session"]
+    outputfunc_name = kwargs["outputfunc_name"]
+
     # the session may be None if the char quits and someone
     # else then edits the object
+
     if session:
-        session.msg(monitor={"name": name, "value": _GA(obj, fieldname)})
+        callsign = {outputfunc_name: {"name": name, "value": _GA(obj, fieldname)}}
+        session.msg(**callsign)
 
 
 def monitor(session, *args, **kwargs):
@@ -383,10 +409,15 @@ def monitor(session, *args, **kwargs):
         in the _monitorable dict earlier in this module
         are accepted.
       stop (bool): Stop monitoring the above name.
+      outputfunc_name (str, optional): Change the name of
+        the outputfunc name. This is used e.g. by MSDP which
+        has its own specific output format.
 
     """
     from evennia.scripts.monitorhandler import MONITOR_HANDLER
+
     name = kwargs.get("name", None)
+    outputfunc_name = kwargs("outputfunc_name", "monitor")
     if name and name in _monitorable and session.puppet:
         field_name = _monitorable[name]
         obj = session.puppet
@@ -394,8 +425,16 @@ def monitor(session, *args, **kwargs):
             MONITOR_HANDLER.remove(obj, field_name, idstring=session.sessid)
         else:
             # the handler will add fieldname and obj to the kwargs automatically
-            MONITOR_HANDLER.add(obj, field_name, _on_monitor_change, idstring=session.sessid,
-                                persistent=False, name=name, session=session)
+            MONITOR_HANDLER.add(
+                obj,
+                field_name,
+                _on_monitor_change,
+                idstring=session.sessid,
+                persistent=False,
+                name=name,
+                session=session,
+                outputfunc_name=outputfunc_name,
+            )
 
 
 def unmonitor(session, *args, **kwargs):
@@ -404,6 +443,18 @@ def unmonitor(session, *args, **kwargs):
     """
     kwargs["stop"] = True
     monitor(session, *args, **kwargs)
+
+
+def monitored(session, *args, **kwargs):
+    """
+    Report on what is being monitored
+
+    """
+    from evennia.scripts.monitorhandler import MONITOR_HANDLER
+
+    obj = session.puppet
+    monitors = MONITOR_HANDLER.all(obj=obj)
+    session.msg(monitored=(monitors, {}))
 
 
 def _on_webclient_options_change(**kwargs):
@@ -460,11 +511,98 @@ def webclient_options(session, *args, **kwargs):
         # Create a monitor. If a monitor already exists then it will replace
         # the previous one since it would use the same idstring
         from evennia.scripts.monitorhandler import MONITOR_HANDLER
-        MONITOR_HANDLER.add(account, "_saved_webclient_options",
-                            _on_webclient_options_change,
-                            idstring=session.sessid, persistent=False,
-                            session=session)
+
+        MONITOR_HANDLER.add(
+            account,
+            "_saved_webclient_options",
+            _on_webclient_options_change,
+            idstring=session.sessid,
+            persistent=False,
+            session=session,
+        )
     else:
         # kwargs provided: persist them to the account object
-        for key, value in kwargs.iteritems():
+        for key, value in kwargs.items():
             clientoptions[key] = value
+
+
+# OOB protocol-specific aliases and wrappers
+
+# GMCP aliases
+hello = client_options
+supports_set = client_options
+
+
+# MSDP aliases (some of the the generic MSDP commands defined in the MSDP spec are prefixed
+# by msdp_ at the protocol level)
+# See https://tintin.sourceforge.io/protocols/msdp/
+
+
+def msdp_list(session, *args, **kwargs):
+    """
+    MSDP LIST command
+
+    """
+    from evennia.scripts.monitorhandler import MONITOR_HANDLER
+
+    args_lower = [arg.lower() for arg in args]
+    if "commands" in args_lower:
+        inputfuncs = [
+            key[5:] if key.startswith("msdp_") else key
+            for key in session.sessionhandler.get_inputfuncs().keys()
+        ]
+        session.msg(commands=(inputfuncs, {}))
+    if "lists" in args_lower:
+        session.msg(
+            lists=(
+                [
+                    "commands",
+                    "lists",
+                    "configurable_variables",
+                    "reportable_variables",
+                    "reported_variables",
+                    "sendable_variables",
+                ],
+                {},
+            )
+        )
+    if "configurable_variables" in args_lower:
+        session.msg(configurable_variables=(_CLIENT_OPTIONS, {}))
+    if "reportable_variables" in args_lower:
+        session.msg(reportable_variables=(_monitorable, {}))
+    if "reported_variables" in args_lower:
+        obj = session.puppet
+        monitor_infos = MONITOR_HANDLER.all(obj=obj)
+        fieldnames = [tup[1] for tup in monitor_infos]
+        session.msg(reported_variables=(fieldnames, {}))
+    if "sendable_variables" in args_lower:
+        # no default sendable variables
+        session.msg(sendable_variables=([], {}))
+
+
+def msdp_report(session, *args, **kwargs):
+    """
+    MSDP REPORT command
+
+    """
+    kwargs["outputfunc_name":"report"]
+    monitor(session, *args, **kwargs)
+
+
+def msdp_unreport(session, *args, **kwargs):
+    """
+    MSDP UNREPORT command
+
+    """
+    unmonitor(session, *args, **kwargs)
+
+
+# client specific
+
+
+def external_discord_hello(session, *args, **kwargs):
+    """
+    Sent by Mudlet as a greeting; added here to avoid
+    logging a missing inputfunc for it.
+    """
+    pass

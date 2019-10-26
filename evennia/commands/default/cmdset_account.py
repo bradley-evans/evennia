@@ -11,7 +11,7 @@ command method rather than caller.msg().
 
 from evennia.commands.cmdset import CmdSet
 from evennia.commands.default import help, comms, admin, system
-from evennia.commands.default import building, account
+from evennia.commands.default import building, account, general
 
 
 class AccountCmdSet(CmdSet):
@@ -38,6 +38,10 @@ class AccountCmdSet(CmdSet):
         self.add(account.CmdPassword())
         self.add(account.CmdColorTest())
         self.add(account.CmdQuell())
+        self.add(account.CmdStyle())
+
+        # nicks
+        self.add(general.CmdNick())
 
         # testing
         self.add(building.CmdExamine())
@@ -52,7 +56,6 @@ class AccountCmdSet(CmdSet):
         self.add(system.CmdPy())
 
         # Admin commands
-        self.add(admin.CmdDelAccount())
         self.add(admin.CmdNewPassword())
 
         # Comm commands
@@ -71,3 +74,4 @@ class AccountCmdSet(CmdSet):
         self.add(comms.CmdIRC2Chan())
         self.add(comms.CmdIRCStatus())
         self.add(comms.CmdRSS2Chan())
+        self.add(comms.CmdGrapevine2Chan())

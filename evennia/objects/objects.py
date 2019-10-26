@@ -6,8 +6,8 @@ entities.
 
 """
 import time
-from builtins import object
-from future.utils import with_metaclass
+import inflect
+from collections import defaultdict
 
 from django.conf import settings
 
@@ -19,18 +19,27 @@ from evennia.scripts.scripthandler import ScriptHandler
 from evennia.commands import cmdset, command
 from evennia.commands.cmdsethandler import CmdSetHandler
 from evennia.commands import cmdhandler
+from evennia.utils import create
 from evennia.utils import search
 from evennia.utils import logger
-from evennia.utils.utils import (variable_from_module, lazy_property,
-                                 make_iter, to_unicode, is_iter, to_str)
+from evennia.utils import ansi
+from evennia.utils.utils import (
+    variable_from_module,
+    lazy_property,
+    make_iter,
+    is_iter,
+    list_to_string,
+    to_str,
+)
 from django.utils.translation import ugettext as _
 
+_INFLECT = inflect.engine()
 _MULTISESSION_MODE = settings.MULTISESSION_MODE
 
 _ScriptDB = None
 _SESSIONS = None
 
-_AT_SEARCH_RESULT = variable_from_module(*settings.SEARCH_AT_RESULT.rsplit('.', 1))
+_AT_SEARCH_RESULT = variable_from_module(*settings.SEARCH_AT_RESULT.rsplit(".", 1))
 # the sessid_max is based on the length of the db_sessid csv field (excluding commas)
 _SESSID_MAX = 16 if _MULTISESSION_MODE in (1, 3) else 1
 
@@ -57,7 +66,9 @@ class ObjectSessionHandler(object):
         global _SESSIONS
         if not _SESSIONS:
             from evennia.server.sessionhandler import SESSIONS as _SESSIONS
-        self._sessid_cache = list(set(int(val) for val in (self.obj.db_sessid or "").split(",") if val))
+        self._sessid_cache = list(
+            set(int(val) for val in (self.obj.db_sessid or "").split(",") if val)
+        )
         if any(sessid for sessid in self._sessid_cache if sessid not in _SESSIONS):
             # cache is out of sync with sessionhandler! Only retain the ones in the handler.
             self._sessid_cache = [sessid for sessid in self._sessid_cache if sessid in _SESSIONS]
@@ -83,9 +94,15 @@ class ObjectSessionHandler(object):
         if not _SESSIONS:
             from evennia.server.sessionhandler import SESSIONS as _SESSIONS
         if sessid:
-            sessions = [_SESSIONS[sessid] if sessid in _SESSIONS else None] if sessid in self._sessid_cache else []
+            sessions = (
+                [_SESSIONS[sessid] if sessid in _SESSIONS else None]
+                if sessid in self._sessid_cache
+                else []
+            )
         else:
-            sessions = [_SESSIONS[ssid] if ssid in _SESSIONS else None for ssid in self._sessid_cache]
+            sessions = [
+                _SESSIONS[ssid] if ssid in _SESSIONS else None for ssid in self._sessid_cache
+            ]
         if None in sessions:
             # this happens only if our cache has gone out of sync with the SessionHandler.
             self._recache()
@@ -173,7 +190,7 @@ class ObjectSessionHandler(object):
 # Base class to inherit from.
 
 
-class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
+class DefaultObject(ObjectDB, metaclass=TypeclassBase):
     """
     This is the root typeclass object, representing all entities that
     have an actual presence in-game. DefaultObjects generally have a
@@ -186,6 +203,11 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
     without `obj.save()` having to be called explicitly.
 
     """
+
+    # lockstring of newly created objects, for easy overloading.
+    # Will be formatted with the appropriate attributes.
+    lockstring = "control:id({account_id}) or perm(Admin);" "delete:id({account_id}) or perm(Admin)"
+
     objects = ObjectManager()
 
     # on-object properties
@@ -209,7 +231,7 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
     @property
     def is_connected(self):
         # we get an error for objects subscribed to channels without this
-        if self.account: # seems sane to pass on the account
+        if self.account:  # seems sane to pass on the account
             return self.account.is_connected
         else:
             return False
@@ -229,8 +251,11 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
         Check if user has an account, and if so, if it is a superuser.
 
         """
-        return self.db_account and self.db_account.is_superuser \
+        return (
+            self.db_account
+            and self.db_account.is_superuser
             and not self.db_account.attributes.get("_quell")
+        )
 
     def contents_get(self, exclude=None):
         """
@@ -252,7 +277,15 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
         con = self.contents_cache.get(exclude=exclude)
         # print "contents_get:", self, con, id(self), calledby()  # DEBUG
         return con
-    contents = property(contents_get)
+
+    def contents_set(self, *args):
+        "You cannot replace this property"
+        raise AttributeError(
+            "{}.contents is read-only. Use obj.move_to or "
+            "obj.location to move an object here.".format(self.__class__)
+        )
+
+    contents = property(contents_get, contents_set, contents_set)
 
     @property
     def exits(self):
@@ -289,18 +322,52 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
             return "{}(#{})".format(self.name, self.id)
         return self.name
 
-    def search(self, searchdata,
-               global_search=False,
-               use_nicks=True,  # should this default to off?
-               typeclass=None,
-               location=None,
-               attribute_name=None,
-               quiet=False,
-               exact=False,
-               candidates=None,
-               nofound_string=None,
-               multimatch_string=None,
-               use_dbref=None):
+    def get_numbered_name(self, count, looker, **kwargs):
+        """
+        Return the numbered (singular, plural) forms of this object's key. This is by default called
+        by return_appearance and is used for grouping multiple same-named of this object. Note that
+        this will be called on *every* member of a group even though the plural name will be only
+        shown once. Also the singular display version, such as 'an apple', 'a tree' is determined
+        from this method.
+
+        Args:
+            count (int): Number of objects of this type
+            looker (Object): Onlooker. Not used by default.
+        Kwargs:
+            key (str): Optional key to pluralize, if given, use this instead of the object's key.
+        Returns:
+            singular (str): The singular form to display.
+            plural (str): The determined plural form of the key, including the count.
+        """
+        key = kwargs.get("key", self.key)
+        key = ansi.ANSIString(key)  # this is needed to allow inflection of colored names
+        plural = _INFLECT.plural(key, 2)
+        plural = "%s %s" % (_INFLECT.number_to_words(count, threshold=12), plural)
+        singular = _INFLECT.an(key)
+        if not self.aliases.get(plural, category="plural_key"):
+            # we need to wipe any old plurals/an/a in case key changed in the interrim
+            self.aliases.clear(category="plural_key")
+            self.aliases.add(plural, category="plural_key")
+            # save the singular form as an alias here too so we can display "an egg" and also
+            # look at 'an egg'.
+            self.aliases.add(singular, category="plural_key")
+        return singular, plural
+
+    def search(
+        self,
+        searchdata,
+        global_search=False,
+        use_nicks=True,
+        typeclass=None,
+        location=None,
+        attribute_name=None,
+        quiet=False,
+        exact=False,
+        candidates=None,
+        nofound_string=None,
+        multimatch_string=None,
+        use_dbref=None,
+    ):
         """
         Returns an Object matching a search string/condition
 
@@ -351,9 +418,11 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
                 caller's contents (inventory).
             nofound_string (str):  optional custom string for not-found error message.
             multimatch_string (str): optional custom string for multimatch error header.
-            use_dbref (bool or None, optional): if True/False, active/deactivate the use of
-                #dbref as valid global search arguments. If None, check against a permission
-                ('Builder' by default).
+            use_dbref (bool or None, optional): If `True`, allow to enter e.g. a query "#123"
+                to find an object (globally) by its database-id 123. If `False`, the string "#123"
+                will be treated like a normal string. If `None` (default), the ability to query by
+                #dbref is turned on if `self` has the permission 'Builder' and is turned off
+                otherwise.
 
         Returns:
             match (Object, None or list): will return an Object/None if `quiet=False`,
@@ -367,14 +436,13 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
             messaging is assumed to be handled by the caller.
 
         """
-        is_string = isinstance(searchdata, basestring)
-
+        is_string = isinstance(searchdata, str)
 
         if is_string:
             # searchdata is a string; wrap some common self-references
-            if searchdata.lower() in ("here", ):
+            if searchdata.lower() in ("here",):
                 return [self.location] if quiet else self.location
-            if searchdata.lower() in ("me", "self",):
+            if searchdata.lower() in ("me", "self"):
                 return [self] if quiet else self
 
         if use_dbref is None:
@@ -382,13 +450,21 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
 
         if use_nicks:
             # do nick-replacement on search
-            searchdata = self.nicks.nickreplace(searchdata, categories=("object", "account"), include_account=True)
+            searchdata = self.nicks.nickreplace(
+                searchdata, categories=("object", "account"), include_account=True
+            )
 
-        if (global_search or (is_string and searchdata.startswith("#") and
-                              len(searchdata) > 1 and searchdata[1:].isdigit())):
+        if global_search or (
+            is_string
+            and searchdata.startswith("#")
+            and len(searchdata) > 1
+            and searchdata[1:].isdigit()
+        ):
             # only allow exact matching if searching the entire database
             # or unique #dbrefs
             exact = True
+            candidates = None
+
         elif candidates is None:
             # no custom candidates given - get them automatically
             if location:
@@ -409,16 +485,24 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
                     # included in location.contents
                     candidates.append(self)
 
-        results = ObjectDB.objects.object_search(searchdata,
-                                                 attribute_name=attribute_name,
-                                                 typeclass=typeclass,
-                                                 candidates=candidates,
-                                                 exact=exact,
-                                                 use_dbref=use_dbref)
+        results = ObjectDB.objects.object_search(
+            searchdata,
+            attribute_name=attribute_name,
+            typeclass=typeclass,
+            candidates=candidates,
+            exact=exact,
+            use_dbref=use_dbref,
+        )
+
         if quiet:
             return results
-        return _AT_SEARCH_RESULT(results, self, query=searchdata,
-                                 nofound_string=nofound_string, multimatch_string=multimatch_string)
+        return _AT_SEARCH_RESULT(
+            results,
+            self,
+            query=searchdata,
+            nofound_string=nofound_string,
+            multimatch_string=multimatch_string,
+        )
 
     def search_account(self, searchdata, quiet=False):
         """
@@ -444,9 +528,9 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
                       matching Accounts.
 
         """
-        if isinstance(searchdata, basestring):
+        if isinstance(searchdata, str):
             # searchdata is a string; wrap some common self-references
-            if searchdata.lower() in ("me", "self",):
+            if searchdata.lower() in ("me", "self"):
                 return [self.account] if quiet else self.account
 
         results = search.search_account(searchdata)
@@ -487,9 +571,12 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
         """
         # nick replacement - we require full-word matching.
         # do text encoding conversion
-        raw_string = to_unicode(raw_string)
-        raw_string = self.nicks.nickreplace(raw_string, categories=("inputline", "channel"), include_account=True)
-        return cmdhandler.cmdhandler(self, raw_string, callertype="object", session=session, **kwargs)
+        raw_string = self.nicks.nickreplace(
+            raw_string, categories=("inputline", "channel"), include_account=True
+        )
+        return cmdhandler.cmdhandler(
+            self, raw_string, callertype="object", session=session, **kwargs
+        )
 
     def msg(self, text=None, from_obj=None, session=None, options=None, **kwargs):
         """
@@ -536,19 +623,18 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
             logger.log_trace()
 
         if text is not None:
-            if not (isinstance(text, basestring) or isinstance(text, tuple)):
+            if not (isinstance(text, str) or isinstance(text, tuple)):
                 # sanitize text before sending across the wire
                 try:
-                    text = to_str(text, force_string=True)
+                    text = to_str(text)
                 except Exception:
                     text = repr(text)
-            kwargs['text'] = text
+            kwargs["text"] = text
 
         # relay to session(s)
         sessions = make_iter(session) if session else self.sessions.all()
         for session in sessions:
             session.data_out(**kwargs)
-
 
     def for_contents(self, func, exclude=None, **kwargs):
         """
@@ -630,17 +716,25 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
             contents = [obj for obj in contents if obj not in exclude]
         for obj in contents:
             if mapping:
-                substitutions = {t: sub.get_display_name(obj)
-                                 if hasattr(sub, 'get_display_name')
-                                 else str(sub) for t, sub in mapping.items()}
+                substitutions = {
+                    t: sub.get_display_name(obj) if hasattr(sub, "get_display_name") else str(sub)
+                    for t, sub in mapping.items()
+                }
                 outmessage = inmessage.format(**substitutions)
             else:
                 outmessage = inmessage
             obj.msg(text=(outmessage, outkwargs), from_obj=from_obj, **kwargs)
 
-    def move_to(self, destination, quiet=False,
-                emit_to_obj=None, use_destination=True, to_none=False, move_hooks=True,
-                **kwargs):
+    def move_to(
+        self,
+        destination,
+        quiet=False,
+        emit_to_obj=None,
+        use_destination=True,
+        to_none=False,
+        move_hooks=True,
+        **kwargs,
+    ):
         """
         Moves this object to a new location.
 
@@ -684,6 +778,7 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
              7. `self.at_after_move(source_location)`
 
         """
+
         def logerr(string="", err=None):
             """Simple log helper method"""
             logger.log_trace()
@@ -822,7 +917,70 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
                     obj.msg(_(string))
             obj.move_to(home)
 
-    def copy(self, new_key=None):
+    @classmethod
+    def create(cls, key, account=None, **kwargs):
+        """
+        Creates a basic object with default parameters, unless otherwise
+        specified or extended.
+
+        Provides a friendlier interface to the utils.create_object() function.
+
+        Args:
+            key (str): Name of the new object.
+            account (Account): Account to attribute this object to.
+
+        Kwargs:
+            description (str): Brief description for this object.
+            ip (str): IP address of creator (for object auditing).
+
+        Returns:
+            object (Object): A newly created object of the given typeclass.
+            errors (list): A list of errors in string form, if any.
+
+        """
+        errors = []
+        obj = None
+
+        # Get IP address of creator, if available
+        ip = kwargs.pop("ip", "")
+
+        # If no typeclass supplied, use this class
+        kwargs["typeclass"] = kwargs.pop("typeclass", cls)
+
+        # Set the supplied key as the name of the intended object
+        kwargs["key"] = key
+
+        # Get a supplied description, if any
+        description = kwargs.pop("description", "")
+
+        # Create a sane lockstring if one wasn't supplied
+        lockstring = kwargs.get("locks")
+        if account and not lockstring:
+            lockstring = cls.lockstring.format(account_id=account.id)
+            kwargs["locks"] = lockstring
+
+        # Create object
+        try:
+            obj = create.create_object(**kwargs)
+
+            # Record creator id and creation IP
+            if ip:
+                obj.db.creator_ip = ip
+            if account:
+                obj.db.creator_id = account.id
+
+            # Set description if there is none, or update it if provided
+            if description or not obj.db.desc:
+                desc = description if description else "You see nothing special."
+                obj.db.desc = desc
+
+        except Exception as e:
+            errors.append("An error occurred while creating this '%s' object." % key)
+            logger.log_err(e)
+
+        return obj, errors
+
+    def copy(self, new_key=None, **kwargs):
         """
         Makes an identical copy of this object, identical except for a
         new dbref in the database. If you want to customize the copy
@@ -836,6 +994,7 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
             copy (Object): A copy of this object.
 
         """
+
         def find_clone_key():
             """
             Append 01, 02 etc to obj.key. Checks next higher number in the
@@ -844,11 +1003,30 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
             returns the new clone name on the form keyXX
             """
             key = self.key
-            num = sum(1 for obj in self.location.contents
-                      if obj.key.startswith(key) and obj.key.lstrip(key).isdigit())
+            num = sum(
+                1
+                for obj in self.location.contents
+                if obj.key.startswith(key) and obj.key.lstrip(key).isdigit()
+            )
             return "%s%03i" % (key, num)
+
         new_key = new_key or find_clone_key()
-        return ObjectDB.objects.copy_object(self, new_key=new_key)
+        new_obj = ObjectDB.objects.copy_object(self, new_key=new_key, **kwargs)
+        self.at_object_post_copy(new_obj, **kwargs)
+        return new_obj
+
+    def at_object_post_copy(self, new_obj, **kwargs):
+        """
+        Called by DefaultObject.copy(). Meant to be overloaded. In case there's extra data not covered by
+        .copy(), this can be used to deal with it.
+
+        Args:
+            new_obj (Object): The new Copy of this object.
+
+        Returns:
+            None
+        """
+        pass
 
     def delete(self):
         """
@@ -877,8 +1055,14 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
             # no need to disconnect, Account just jumps to OOC mode.
         # sever the connection (important!)
         if self.account:
+            # Remove the object from playable characters list
+            if self in self.account.db._playable_characters:
+                self.account.db._playable_characters = [
+                    x for x in self.account.db._playable_characters if x != self
+                ]
             for session in self.sessions.all():
                 self.account.unpuppet_object(session)
+
         self.account = None
 
         for script in _ScriptDB.objects.get_all_scripts_on_obj(self):
@@ -894,10 +1078,12 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
         self.location = None  # this updates contents_cache for our location
 
         # Perform the deletion of the object
-        super(DefaultObject, self).delete()
+        super().delete()
         return True
 
-    def access(self, accessing_obj, access_type='read', default=False, no_superuser_bypass=False, **kwargs):
+    def access(
+        self, accessing_obj, access_type="read", default=False, no_superuser_bypass=False, **kwargs
+    ):
         """
         Determines if another object has permission to access this object
         in whatever way.
@@ -913,8 +1099,12 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
           Passed on to the at_access hook along with the result of the access check.
 
         """
-        result = super(DefaultObject, self).access(accessing_obj, access_type=access_type,
-                                                   default=default, no_superuser_bypass=no_superuser_bypass)
+        result = super().access(
+            accessing_obj,
+            access_type=access_type,
+            default=default,
+            no_superuser_bypass=no_superuser_bypass,
+        )
         self.at_access(result, accessing_obj, access_type, **kwargs)
         return result
 
@@ -969,14 +1159,14 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
                 cdict["location"].at_object_receive(self, None)
                 self.at_after_move(None)
             if cdict.get("tags"):
-                # this should be a list of tags
+                # this should be a list of tags, tuples (key, category) or (key, category, data)
                 self.tags.batch_add(*cdict["tags"])
             if cdict.get("attributes"):
-                # this should be a dict of attrname:value
+                # this should be tuples (key, val, ...)
                 self.attributes.batch_add(*cdict["attributes"])
             if cdict.get("nattributes"):
                 # this should be a dict of nattrname:value
-                for key, value in cdict["nattributes"].items():
+                for key, value in cdict["nattributes"]:
                     self.nattributes.add(key, value)
 
             del self._createdict
@@ -999,16 +1189,22 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
         # commands may set this (create an item and you should be its
         # controller, for example)
 
-        self.locks.add(";".join([
-            "control:perm(Developer)",  # edit locks/permissions, delete
-            "examine:perm(Builder)",   # examine properties
-            "view:all()",               # look at object (visibility)
-            "edit:perm(Admin)",       # edit properties/attributes
-            "delete:perm(Admin)",     # delete object
-            "get:all()",                # pick up object
-            "call:true()",              # allow to call commands on this object
-            "tell:perm(Admin)",        # allow emits to this object
-            "puppet:pperm(Developer)"]))  # lock down puppeting only to staff by default
+        self.locks.add(
+            ";".join(
+                [
+                    "control:perm(Developer)",  # edit locks/permissions, delete
+                    "examine:perm(Builder)",  # examine properties
+                    "view:all()",  # look at object (visibility)
+                    "edit:perm(Admin)",  # edit properties/attributes
+                    "delete:perm(Admin)",  # delete object
+                    "get:all()",  # pick up object
+                    "drop:holds()",  # drop only that which you hold
+                    "call:true()",  # allow to call commands on this object
+                    "tell:perm(Admin)",  # allow emits to this object
+                    "puppet:pperm(Developer)",
+                ]
+            )
+        )  # lock down puppeting only to staff by default
 
     def basetype_posthook_setup(self):
         """
@@ -1094,6 +1290,7 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
             puppeting this Object.
 
         """
+        self.msg(f"You become |w{self.key}|n.")
         self.account.db._last_puppet = self
 
     def at_pre_unpuppet(self, **kwargs):
@@ -1219,18 +1416,22 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
             string = "{object} is leaving {origin}, heading for {destination}."
 
         location = self.location
-        exits = [o for o in location.contents if o.location is location and o.destination is destination]
+        exits = [
+            o for o in location.contents if o.location is location and o.destination is destination
+        ]
         if not mapping:
             mapping = {}
 
-        mapping.update({
-            "object": self,
-            "exit": exits[0] if exits else "somewhere",
-            "origin": location or "nowhere",
-            "destination": destination or "nowhere",
-        })
+        mapping.update(
+            {
+                "object": self,
+                "exit": exits[0] if exits else "somewhere",
+                "origin": location or "nowhere",
+                "destination": destination or "nowhere",
+            }
+        )
 
-        location.msg_contents(string, exclude=(self, ), mapping=mapping)
+        location.msg_contents(string, exclude=(self,), mapping=mapping)
 
     def announce_move_to(self, source_location, msg=None, mapping=None, **kwargs):
         """
@@ -1274,19 +1475,25 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
         destination = self.location
         exits = []
         if origin:
-            exits = [o for o in destination.contents if o.location is destination and o.destination is origin]
+            exits = [
+                o
+                for o in destination.contents
+                if o.location is destination and o.destination is origin
+            ]
 
         if not mapping:
             mapping = {}
 
-        mapping.update({
-            "object": self,
-            "exit": exits[0] if exits else "somewhere",
-            "origin": origin or "nowhere",
-            "destination": destination or "nowhere",
-        })
+        mapping.update(
+            {
+                "object": self,
+                "exit": exits[0] if exits else "somewhere",
+                "origin": origin or "nowhere",
+                "destination": destination or "nowhere",
+            }
+        )
 
-        destination.msg_contents(string, exclude=(self, ), mapping=mapping)
+        destination.msg_contents(string, exclude=(self,), mapping=mapping)
 
     def at_after_move(self, source_location, **kwargs):
         """
@@ -1448,9 +1655,8 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
         if not looker:
             return ""
         # get and identify all objects
-        visible = (con for con in self.contents if con != looker and
-                   con.access(looker, "view"))
-        exits, users, things = [], [], []
+        visible = (con for con in self.contents if con != looker and con.access(looker, "view"))
+        exits, users, things = [], [], defaultdict(list)
         for con in visible:
             key = con.get_display_name(looker)
             if con.destination:
@@ -1458,16 +1664,30 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
             elif con.has_account:
                 users.append("|c%s|n" % key)
             else:
-                things.append(key)
+                # things can be pluralized
+                things[key].append(con)
         # get description, build string
         string = "|c%s|n\n" % self.get_display_name(looker)
         desc = self.db.desc
         if desc:
             string += "%s" % desc
         if exits:
-            string += "\n|wExits:|n " + ", ".join(exits)
+            string += "\n|wExits:|n " + list_to_string(exits)
         if users or things:
-            string += "\n|wYou see:|n " + ", ".join(users + things)
+            # handle pluralization of things (never pluralize users)
+            thing_strings = []
+            for key, itemlist in sorted(things.items()):
+                nitem = len(itemlist)
+                if nitem == 1:
+                    key, _ = itemlist[0].get_numbered_name(nitem, looker, key=key)
+                else:
+                    key = [item.get_numbered_name(nitem, looker, key=key)[1] for item in itemlist][
+                        0
+                    ]
+                thing_strings.append(key)
+
+            string += "\n|wYou see:|n " + list_to_string(users + thing_strings)
+
         return string
 
     def at_look(self, target, **kwargs):
@@ -1481,7 +1701,9 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
                 commonly an object or the current location. It will
                 be checked for the "view" type access.
             **kwargs (dict): Arbitrary, optional arguments for users
-                overriding the call (unused by default).
+                overriding the call. This will be passed into
+                return_appearance, get_display_name and at_desc but is not used
+                by default.
 
         Returns:
             lookstring (str): A ready-processed look string
@@ -1490,15 +1712,15 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
         """
         if not target.access(self, "view"):
             try:
-                return "Could not view '%s'." % target.get_display_name(self)
+                return "Could not view '%s'." % target.get_display_name(self, **kwargs)
             except AttributeError:
                 return "Could not view '%s'." % target.key
 
-        description = target.return_appearance(self)
+        description = target.return_appearance(self, **kwargs)
 
         # the target's at_desc() method.
         # this must be the last reference to target so it may delete itself when acted on.
-        target.at_desc(looker=self)
+        target.at_desc(looker=self, **kwargs)
 
         return description
 
@@ -1514,6 +1736,25 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
         """
         pass
 
+    def at_before_get(self, getter, **kwargs):
+        """
+        Called by the default `get` command before this object has been
+        picked up.
+
+        Args:
+            getter (Object): The object about to get this object.
+            **kwargs (dict): Arbitrary, optional arguments for users
+                overriding the call (unused by default).
+
+        Returns:
+            shouldget (bool): If the object should be gotten or not.
+
+        Notes:
+            If this method returns False/None, the getting is cancelled
+            before it is even started.
+        """
+        return True
+
     def at_get(self, getter, **kwargs):
         """
         Called by the default `get` command when this object has been
@@ -1526,10 +1767,31 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
 
         Notes:
             This hook cannot stop the pickup from happening. Use
-            permissions for that.
+            permissions or the at_before_get() hook for that.
 
         """
         pass
+
+    def at_before_give(self, giver, getter, **kwargs):
+        """
+        Called by the default `give` command before this object has been
+        given.
+
+        Args:
+            giver (Object): The object about to give this object.
+            getter (Object): The object about to get this object.
+            **kwargs (dict): Arbitrary, optional arguments for users
+                overriding the call (unused by default).
+
+        Returns:
+            shouldgive (bool): If the object should be given or not.
+
+        Notes:
+            If this method returns False/None, the giving is cancelled
+            before it is even started.
+
+        """
+        return True
 
     def at_give(self, giver, getter, **kwargs):
         """
@@ -1544,10 +1806,36 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
 
         Notes:
             This hook cannot stop the give from happening. Use
-            permissions for that.
+            permissions or the at_before_give() hook for that.
 
         """
         pass
+
+    def at_before_drop(self, dropper, **kwargs):
+        """
+        Called by the default `drop` command before this object has been
+        dropped.
+
+        Args:
+            dropper (Object): The object which will drop this object.
+            **kwargs (dict): Arbitrary, optional arguments for users
+                overriding the call (unused by default).
+
+        Returns:
+            shoulddrop (bool): If the object should be dropped or not.
+
+        Notes:
+            If this method returns False/None, the dropping is cancelled
+            before it is even started.
+
+        """
+        if not self.locks.get("drop"):
+            # TODO: This if-statment will be removed in Evennia 1.0
+            return True
+        if not self.access(dropper, "drop", default=False):
+            dropper.msg(f"You cannot drop {self.get_display_name(dropper)}")
+            return False
+        return True
 
     def at_drop(self, dropper, **kwargs):
         """
@@ -1561,7 +1849,7 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
 
         Notes:
             This hook cannot stop the drop from happening. Use
-            permissions from that.
+            permissions or the at_before_drop() hook for that.
 
         """
         pass
@@ -1590,8 +1878,15 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
         """
         return message
 
-    def at_say(self, message, msg_self=None, msg_location=None,
-               receivers=None, msg_receivers=None, **kwargs):
+    def at_say(
+        self,
+        message,
+        msg_self=None,
+        msg_location=None,
+        receivers=None,
+        msg_receivers=None,
+        **kwargs,
+    ):
         """
         Display the actual say (or whisper) of self.
 
@@ -1636,70 +1931,90 @@ class DefaultObject(with_metaclass(TypeclassBase, ObjectDB)):
                 {location}: the location where object is.
 
         """
-        msg_type = 'say'
+        msg_type = "say"
         if kwargs.get("whisper", False):
             # whisper mode
-            msg_type = 'whisper'
-            msg_self = '{self} whisper to {all_receivers}, "{speech}"' if msg_self is True else msg_self
+            msg_type = "whisper"
+            msg_self = (
+                '{self} whisper to {all_receivers}, "{speech}"' if msg_self is True else msg_self
+            )
             msg_receivers = msg_receivers or '{object} whispers: "{speech}"'
             msg_location = None
         else:
             msg_self = '{self} say, "{speech}"' if msg_self is True else msg_self
-            msg_receivers = None
             msg_location = msg_location or '{object} says, "{speech}"'
+            msg_receivers = msg_receivers or message
 
-        custom_mapping = kwargs.get('mapping', {})
+        custom_mapping = kwargs.get("mapping", {})
         receivers = make_iter(receivers) if receivers else None
         location = self.location
 
         if msg_self:
-            self_mapping = {"self": "You",
-                            "object": self.get_display_name(self),
-                            "location": location.get_display_name(self) if location else None,
-                            "receiver": None,
-                            "all_receivers": ", ".join(
-                                recv.get_display_name(self)
-                                for recv in receivers) if receivers else None,
-                            "speech": message}
+            self_mapping = {
+                "self": "You",
+                "object": self.get_display_name(self),
+                "location": location.get_display_name(self) if location else None,
+                "receiver": None,
+                "all_receivers": ", ".join(recv.get_display_name(self) for recv in receivers)
+                if receivers
+                else None,
+                "speech": message,
+            }
             self_mapping.update(custom_mapping)
             self.msg(text=(msg_self.format(**self_mapping), {"type": msg_type}), from_obj=self)
 
         if receivers and msg_receivers:
-            receiver_mapping = {"self": "You",
-                                "object": None,
-                                "location": None,
-                                "receiver": None,
-                                "all_receivers": None,
-                                "speech": message}
+            receiver_mapping = {
+                "self": "You",
+                "object": None,
+                "location": None,
+                "receiver": None,
+                "all_receivers": None,
+                "speech": message,
+            }
             for receiver in make_iter(receivers):
-                individual_mapping = {"object": self.get_display_name(receiver),
-                                      "location": location.get_display_name(receiver),
-                                      "receiver": receiver.get_display_name(receiver),
-                                      "all_receivers": ", ".join(
-                                            recv.get_display_name(recv)
-                                            for recv in receivers) if receivers else None}
+                individual_mapping = {
+                    "object": self.get_display_name(receiver),
+                    "location": location.get_display_name(receiver),
+                    "receiver": receiver.get_display_name(receiver),
+                    "all_receivers": ", ".join(recv.get_display_name(recv) for recv in receivers)
+                    if receivers
+                    else None,
+                }
                 receiver_mapping.update(individual_mapping)
                 receiver_mapping.update(custom_mapping)
-                receiver.msg(text=(msg_receivers.format(**receiver_mapping),
-                             {"type": msg_type}), from_obj=self)
+                receiver.msg(
+                    text=(msg_receivers.format(**receiver_mapping), {"type": msg_type}),
+                    from_obj=self,
+                )
 
         if self.location and msg_location:
-            location_mapping = {"self": "You",
-                                "object": self,
-                                "location": location,
-                                "all_receivers": ", ".join(str(recv) for recv in receivers) if receivers else None,
-                                "receiver": None,
-                                "speech": message}
+            location_mapping = {
+                "self": "You",
+                "object": self,
+                "location": location,
+                "all_receivers": ", ".join(str(recv) for recv in receivers) if receivers else None,
+                "receiver": None,
+                "speech": message,
+            }
             location_mapping.update(custom_mapping)
-            self.location.msg_contents(text=(msg_location, {"type": msg_type}),
-                                       from_obj=self,
-                                       exclude=(self, ) if msg_self else None,
-                                       mapping=location_mapping)
+            exclude = []
+            if msg_self:
+                exclude.append(self)
+            if receivers:
+                exclude.extend(receivers)
+            self.location.msg_contents(
+                text=(msg_location, {"type": msg_type}),
+                from_obj=self,
+                exclude=exclude,
+                mapping=location_mapping,
+            )
 
 
 #
 # Base Character object
 #
+
 
 class DefaultCharacter(DefaultObject):
     """
@@ -1707,6 +2022,93 @@ class DefaultCharacter(DefaultObject):
     a character avatar controlled by an account.
 
     """
+
+    # lockstring of newly created rooms, for easy overloading.
+    # Will be formatted with the appropriate attributes.
+    lockstring = "puppet:id({character_id}) or pid({account_id}) or perm(Developer) or pperm(Developer);delete:id({account_id}) or perm(Admin)"
+
+    @classmethod
+    def create(cls, key, account, **kwargs):
+        """
+        Creates a basic Character with default parameters, unless otherwise
+        specified or extended.
+
+        Provides a friendlier interface to the utils.create_character() function.
+
+        Args:
+            key (str): Name of the new Character.
+            account (obj): Account to associate this Character with. Required as
+                an argument, but one can fake it out by supplying None-- it will
+                change the default lockset and skip creator attribution.
+
+        Kwargs:
+            description (str): Brief description for this object.
+            ip (str): IP address of creator (for object auditing).
+            All other kwargs will be passed into the create_object call.
+
+        Returns:
+            character (Object): A newly created Character of the given typeclass.
+            errors (list): A list of errors in string form, if any.
+
+        """
+        errors = []
+        obj = None
+        # Get IP address of creator, if available
+        ip = kwargs.pop("ip", "")
+
+        # If no typeclass supplied, use this class
+        kwargs["typeclass"] = kwargs.pop("typeclass", cls)
+
+        # Set the supplied key as the name of the intended object
+        kwargs["key"] = key
+
+        # Get home for character
+        kwargs["home"] = ObjectDB.objects.get_id(kwargs.get("home", settings.DEFAULT_HOME))
+
+        # Get permissions
+        kwargs["permissions"] = kwargs.get("permissions", settings.PERMISSION_ACCOUNT_DEFAULT)
+
+        # Get description if provided
+        description = kwargs.pop("description", "")
+
+        # Get locks if provided
+        locks = kwargs.pop("locks", "")
+
+        try:
+            # Check to make sure account does not have too many chars
+            if len(account.characters) >= settings.MAX_NR_CHARACTERS:
+                errors.append("There are too many characters associated with this account.")
+                return obj, errors
+
+            # Create the Character
+            obj = create.create_object(**kwargs)
+
+            # Record creator id and creation IP
+            if ip:
+                obj.db.creator_ip = ip
+            if account:
+                obj.db.creator_id = account.id
+                if obj not in account.characters:
+                    account.db._playable_characters.append(obj)
+
+            # Add locks
+            if not locks and account:
+                # Allow only the character itself and the creator account to puppet this character (and Developers).
+                locks = cls.lockstring.format(**{"character_id": obj.id, "account_id": account.id})
+            elif not locks and not account:
+                locks = cls.lockstring.format(**{"character_id": obj.id, "account_id": -1})
+
+            obj.locks.add(locks)
+
+            # If no description is set, set a default description
+            if description or not obj.db.desc:
+                obj.db.desc = description if description else "This is a character."
+
+        except Exception as e:
+            errors.append("An error occurred while creating this '%s' object." % key)
+            logger.log_err(e)
+
+        return obj, errors
 
     def basetype_setup(self):
         """
@@ -1718,9 +2120,10 @@ class DefaultCharacter(DefaultObject):
         Character object works).
 
         """
-        super(DefaultCharacter, self).basetype_setup()
-        self.locks.add(";".join(["get:false()",  # noone can pick up the character
-                                 "call:false()"]))  # no commands can be called on character from outside
+        super().basetype_setup()
+        self.locks.add(
+            ";".join(["get:false()", "call:false()"])  # noone can pick up the character
+        )  # no commands can be called on character from outside
         # add the default cmdset
         self.cmdset.add_default(settings.CMDSET_CHARACTER, permanent=True)
 
@@ -1739,14 +2142,20 @@ class DefaultCharacter(DefaultObject):
             account (Account): This is the connecting account.
             session (Session): Session controlling the connection.
         """
-        if self.location is None:  # Make sure character's location is never None before being puppeted.
+        if (
+            self.location is None
+        ):  # Make sure character's location is never None before being puppeted.
             # Return to last location (or home, which should always exist),
             self.location = self.db.prelogout_location if self.db.prelogout_location else self.home
-            self.location.at_object_receive(self, None)  # and trigger the location's reception hook.
+            self.location.at_object_receive(
+                self, None
+            )  # and trigger the location's reception hook.
         if self.location:  # If the character is verified to be somewhere,
             self.db.prelogout_location = self.location  # save location again to be sure.
         else:
-            account.msg("|r%s has no location and no home is set.|n" % self, session=session)  # Note to set home.
+            account.msg(
+                "|r%s has no location and no home is set.|n" % self, session=session
+            )  # Note to set home.
 
     def at_post_puppet(self, **kwargs):
         """
@@ -1764,10 +2173,11 @@ class DefaultCharacter(DefaultObject):
 
         """
         self.msg("\nYou become |c%s|n.\n" % self.name)
-        self.msg(self.at_look(self.location))
+        self.msg((self.at_look(self.location), {"type": "look"}), options=None)
 
         def message(obj, from_obj):
             obj.msg("%s has entered the game." % self.get_display_name(obj), from_obj=from_obj)
+
         self.location.for_contents(message, exclude=[self], from_obj=self)
 
     def at_post_unpuppet(self, account, session=None, **kwargs):
@@ -1787,8 +2197,10 @@ class DefaultCharacter(DefaultObject):
         if not self.sessions.count():
             # only remove this char from grid if no sessions control it anymore.
             if self.location:
+
                 def message(obj, from_obj):
                     obj.msg("%s has left the game." % self.get_display_name(obj), from_obj=from_obj)
+
                 self.location.for_contents(message, exclude=[self], from_obj=self)
                 self.db.prelogout_location = self.location
                 self.location = None
@@ -1815,6 +2227,7 @@ class DefaultCharacter(DefaultObject):
             return time.time() - float(min(conn))
         return None
 
+
 #
 # Base Room object
 
@@ -1825,6 +2238,77 @@ class DefaultRoom(DefaultObject):
     location is always `None`.
     """
 
+    # lockstring of newly created rooms, for easy overloading.
+    # Will be formatted with the {id} of the creating object.
+    lockstring = (
+        "control:id({id}) or perm(Admin); "
+        "delete:id({id}) or perm(Admin); "
+        "edit:id({id}) or perm(Admin)"
+    )
+
+    @classmethod
+    def create(cls, key, account, **kwargs):
+        """
+        Creates a basic Room with default parameters, unless otherwise
+        specified or extended.
+
+        Provides a friendlier interface to the utils.create_object() function.
+
+        Args:
+            key (str): Name of the new Room.
+            account (obj): Account to associate this Room with.
+
+        Kwargs:
+            description (str): Brief description for this object.
+            ip (str): IP address of creator (for object auditing).
+
+        Returns:
+            room (Object): A newly created Room of the given typeclass.
+            errors (list): A list of errors in string form, if any.
+
+        """
+        errors = []
+        obj = None
+
+        # Get IP address of creator, if available
+        ip = kwargs.pop("ip", "")
+
+        # If no typeclass supplied, use this class
+        kwargs["typeclass"] = kwargs.pop("typeclass", cls)
+
+        # Set the supplied key as the name of the intended object
+        kwargs["key"] = key
+
+        # Get who to send errors to
+        kwargs["report_to"] = kwargs.pop("report_to", account)
+
+        # Get description, if provided
+        description = kwargs.pop("description", "")
+
+        try:
+            # Create the Room
+            obj = create.create_object(**kwargs)
+
+            # Set appropriate locks
+            lockstring = kwargs.get("locks", cls.lockstring.format(id=account.id))
+            obj.locks.add(lockstring)
+
+            # Record creator id and creation IP
+            if ip:
+                obj.db.creator_ip = ip
+            if account:
+                obj.db.creator_id = account.id
+
+            # If no description is set, set a default description
+            if description or not obj.db.desc:
+                obj.db.desc = description if description else "This is a room."
+
+        except Exception as e:
+            errors.append("An error occurred while creating this '%s' object." % key)
+            logger.log_err(e)
+
+        return obj, errors
+
     def basetype_setup(self):
         """
         Simple room setup setting locks to make sure the room
@@ -1832,9 +2316,10 @@ class DefaultRoom(DefaultObject):
 
         """
 
-        super(DefaultRoom, self).basetype_setup()
-        self.locks.add(";".join(["get:false()",
-                                 "puppet:false()"]))  # would be weird to puppet a room ...
+        super().basetype_setup()
+        self.locks.add(
+            ";".join(["get:false()", "puppet:false()"])
+        )  # would be weird to puppet a room ...
         self.location = None
 
 
@@ -1842,12 +2327,14 @@ class DefaultRoom(DefaultObject):
 # Default Exit command, used by the base exit object
 #
 
+
 class ExitCommand(command.Command):
     """
     This is a command that simply cause the caller to traverse
     the object it is attached to.
 
     """
+
     obj = None
 
     def func(self):
@@ -1855,7 +2342,7 @@ class ExitCommand(command.Command):
         Default exit traverse if no syscommand is defined.
         """
 
-        if self.obj.access(self.caller, 'traverse'):
+        if self.obj.access(self.caller, "traverse"):
             # we may traverse the exit.
             self.obj.at_traverse(self.caller, self.obj.destination)
         else:
@@ -1884,6 +2371,7 @@ class ExitCommand(command.Command):
         else:
             return " (%s)" % self.obj.get_display_name(caller)
 
+
 #
 # Base Exit object
 
@@ -1902,6 +2390,15 @@ class DefaultExit(DefaultObject):
 
     exit_command = ExitCommand
     priority = 101
+
+    # lockstring of newly created exits, for easy overloading.
+    # Will be formatted with the {id} of the creating object.
+    lockstring = (
+        "control:id({id}) or perm(Admin); "
+        "delete:id({id}) or perm(Admin); "
+        "edit:id({id}) or perm(Admin)"
+    )
+
     # Helper classes and methods to implement the Exit. These need not
     # be overloaded unless one want to change the foundation for how
     # Exits work. See the end of the class for hook methods to overload.
@@ -1921,17 +2418,19 @@ class DefaultExit(DefaultObject):
 
         # create an exit command. We give the properties here,
         # to always trigger metaclass preparations
-        cmd = self.exit_command(key=exidbobj.db_key.strip().lower(),
-                                aliases=exidbobj.aliases.all(),
-                                locks=str(exidbobj.locks),
-                                auto_help=False,
-                                destination=exidbobj.db_destination,
-                                arg_regex=r"^$",
-                                is_exit=True,
-                                obj=exidbobj)
+        cmd = self.exit_command(
+            key=exidbobj.db_key.strip().lower(),
+            aliases=exidbobj.aliases.all(),
+            locks=str(exidbobj.locks),
+            auto_help=False,
+            destination=exidbobj.db_destination,
+            arg_regex=r"^$",
+            is_exit=True,
+            obj=exidbobj,
+        )
         # create a cmdset
         exit_cmdset = cmdset.CmdSet(None)
-        exit_cmdset.key = 'ExitCmdSet'
+        exit_cmdset.key = "ExitCmdSet"
         exit_cmdset.priority = self.priority
         exit_cmdset.duplicates = True
         # add command to cmdset
@@ -1939,6 +2438,75 @@ class DefaultExit(DefaultObject):
         return exit_cmdset
 
     # Command hooks
+
+    @classmethod
+    def create(cls, key, account, source, dest, **kwargs):
+        """
+        Creates a basic Exit with default parameters, unless otherwise
+        specified or extended.
+
+        Provides a friendlier interface to the utils.create_object() function.
+
+        Args:
+            key (str): Name of the new Exit, as it should appear from the
+                source room.
+            account (obj): Account to associate this Exit with.
+            source (Room): The room to create this exit in.
+            dest (Room): The room to which this exit should go.
+
+        Kwargs:
+            description (str): Brief description for this object.
+            ip (str): IP address of creator (for object auditing).
+
+        Returns:
+            exit (Object): A newly created Room of the given typeclass.
+            errors (list): A list of errors in string form, if any.
+
+        """
+        errors = []
+        obj = None
+
+        # Get IP address of creator, if available
+        ip = kwargs.pop("ip", "")
+
+        # If no typeclass supplied, use this class
+        kwargs["typeclass"] = kwargs.pop("typeclass", cls)
+
+        # Set the supplied key as the name of the intended object
+        kwargs["key"] = key
+
+        # Get who to send errors to
+        kwargs["report_to"] = kwargs.pop("report_to", account)
+
+        # Set to/from rooms
+        kwargs["location"] = source
+        kwargs["destination"] = dest
+
+        description = kwargs.pop("description", "")
+
+        try:
+            # Create the Exit
+            obj = create.create_object(**kwargs)
+
+            # Set appropriate locks
+            lockstring = kwargs.get("locks", cls.lockstring.format(id=account.id))
+            obj.locks.add(lockstring)
+
+            # Record creator id and creation IP
+            if ip:
+                obj.db.creator_ip = ip
+            if account:
+                obj.db.creator_id = account.id
+
+            # If no description is set, set a default description
+            if description or not obj.db.desc:
+                obj.db.desc = description if description else "This is an exit."
+
+        except Exception as e:
+            errors.append("An error occurred while creating this '%s' object." % key)
+            logger.log_err(e)
+
+        return obj, errors
 
     def basetype_setup(self):
         """
@@ -1948,12 +2516,18 @@ class DefaultExit(DefaultObject):
         sure you include all the functionality in this method.
 
         """
-        super(DefaultExit, self).basetype_setup()
+        super().basetype_setup()
 
         # setting default locks (overload these in at_object_creation()
-        self.locks.add(";".join(["puppet:false()",  # would be weird to puppet an exit ...
-                                 "traverse:all()",  # who can pass through exit by default
-                                 "get:false()"]))   # noone can pick up the exit
+        self.locks.add(
+            ";".join(
+                [
+                    "puppet:false()",  # would be weird to puppet an exit ...
+                    "traverse:all()",  # who can pass through exit by default
+                    "get:false()",
+                ]
+            )
+        )  # noone can pick up the exit
 
         # an exit should have a destination (this is replaced at creation time)
         if self.location:
@@ -2003,7 +2577,7 @@ class DefaultExit(DefaultObject):
         else:
             if self.db.err_traverse:
                 # if exit has a better error message, let's use it.
-                self.caller.msg(self.db.err_traverse)
+                traversing_object.msg(self.db.err_traverse)
             else:
                 # No shorthand error message. Call hook.
                 self.at_failed_traverse(traversing_object)

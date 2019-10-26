@@ -8,7 +8,6 @@ which is a non-db version of Attributes.
 
 
 """
-from builtins import object
 import re
 import fnmatch
 import weakref
@@ -61,35 +60,51 @@ class Attribute(SharedMemoryModel):
     #
     # These database fields are all set using their corresponding properties,
     # named same as the field, but withtout the db_* prefix.
-    db_key = models.CharField('key', max_length=255, db_index=True)
+    db_key = models.CharField("key", max_length=255, db_index=True)
     db_value = PickledObjectField(
-        'value', null=True,
+        "value",
+        null=True,
         help_text="The data returned when the attribute is accessed. Must be "
-                  "written as a Python literal if editing through the admin "
-                  "interface. Attribute values which are not Python literals "
-                  "cannot be edited through the admin interface.")
+        "written as a Python literal if editing through the admin "
+        "interface. Attribute values which are not Python literals "
+        "cannot be edited through the admin interface.",
+    )
     db_strvalue = models.TextField(
-        'strvalue', null=True, blank=True,
-        help_text="String-specific storage for quick look-up")
+        "strvalue", null=True, blank=True, help_text="String-specific storage for quick look-up"
+    )
     db_category = models.CharField(
-        'category', max_length=128, db_index=True, blank=True, null=True,
-        help_text="Optional categorization of attribute.")
+        "category",
+        max_length=128,
+        db_index=True,
+        blank=True,
+        null=True,
+        help_text="Optional categorization of attribute.",
+    )
     # Lock storage
     db_lock_storage = models.TextField(
-        'locks', blank=True,
-        help_text="Lockstrings for this object are stored here.")
+        "locks", blank=True, help_text="Lockstrings for this object are stored here."
+    )
     db_model = models.CharField(
-        'model', max_length=32, db_index=True, blank=True, null=True,
+        "model",
+        max_length=32,
+        db_index=True,
+        blank=True,
+        null=True,
         help_text="Which model of object this attribute is attached to (A "
-                  "natural key like 'objects.objectdb'). You should not change "
-                  "this value unless you know what you are doing.")
+        "natural key like 'objects.objectdb'). You should not change "
+        "this value unless you know what you are doing.",
+    )
     # subclass of Attribute (None or nick)
     db_attrtype = models.CharField(
-        'attrtype', max_length=16, db_index=True, blank=True, null=True,
-        help_text="Subclass of Attribute (None or nick)")
+        "attrtype",
+        max_length=16,
+        db_index=True,
+        blank=True,
+        null=True,
+        help_text="Subclass of Attribute (None or nick)",
+    )
     # time stamp
-    db_date_created = models.DateTimeField(
-        'date_created', editable=False, auto_now_add=True)
+    db_date_created = models.DateTimeField("date_created", editable=False, auto_now_add=True)
 
     # Database manager
     # objects = managers.AttributeManager()
@@ -156,6 +171,7 @@ class Attribute(SharedMemoryModel):
     def __value_del(self):
         """Deleter. Allows for del attr.value. This removes the entire attribute."""
         self.delete()
+
     value = property(__value_get, __value_set, __value_del)
 
     #
@@ -167,10 +183,10 @@ class Attribute(SharedMemoryModel):
     def __str__(self):
         return smart_str("%s(%s)" % (self.db_key, self.id))
 
-    def __unicode__(self):
-        return u"%s(%s)" % (self.db_key, self.id)
+    def __repr__(self):
+        return "%s(%s)" % (self.db_key, self.id)
 
-    def access(self, accessing_obj, access_type='read', default=False, **kwargs):
+    def access(self, accessing_obj, access_type="read", default=False, **kwargs):
         """
         Determines if another object has permission to access.
 
@@ -196,10 +212,12 @@ class Attribute(SharedMemoryModel):
 # Handlers making use of the Attribute model
 #
 
+
 class AttributeHandler(object):
     """
     Handler for adding Attributes to the object.
     """
+
     _m2m_fieldname = "db_attributes"
     _attrcreate = "attrcreate"
     _attredit = "attredit"
@@ -219,17 +237,26 @@ class AttributeHandler(object):
 
     def _fullcache(self):
         """Cache all attributes of this object"""
-        query = {"%s__id" % self._model: self._objid,
-                 "attribute__db_model__iexact": self._model,
-                 "attribute__db_attrtype": self._attrtype}
+        query = {
+            "%s__id" % self._model: self._objid,
+            "attribute__db_model__iexact": self._model,
+            "attribute__db_attrtype": self._attrtype,
+        }
         attrs = [
-            conn.attribute for conn in getattr(
-                self.obj,
-                self._m2m_fieldname).through.objects.filter(
-                **query)]
-        self._cache = dict(("%s-%s" % (to_str(attr.db_key).lower(),
-                                       attr.db_category.lower() if attr.db_category else None),
-                            attr) for attr in attrs)
+            conn.attribute
+            for conn in getattr(self.obj, self._m2m_fieldname).through.objects.filter(**query)
+        ]
+        self._cache = dict(
+            (
+                "%s-%s"
+                % (
+                    to_str(attr.db_key).lower(),
+                    attr.db_category.lower() if attr.db_category else None,
+                ),
+                attr,
+            )
+            for attr in attrs
+        )
         self._cache_complete = True
 
     def _getcache(self, key=None, category=None):
@@ -245,7 +272,7 @@ class AttributeHandler(object):
                 found from cache or database.
         Notes:
             When given a category only, a search for all objects
-            of that cateogory is done and a the category *name* is is
+            of that cateogory is done and the category *name* is
             stored. This tells the system on subsequent calls that the
             list of cached attributes of this category is up-to-date
             and that the cache can be queried for category matches
@@ -277,11 +304,13 @@ class AttributeHandler(object):
                 else:
                     return []  # no such attribute: return an empty list
             else:
-                query = {"%s__id" % self._model: self._objid,
-                         "attribute__db_model__iexact": self._model,
-                         "attribute__db_attrtype": self._attrtype,
-                         "attribute__db_key__iexact": key.lower(),
-                         "attribute__db_category__iexact": category.lower() if category else None}
+                query = {
+                    "%s__id" % self._model: self._objid,
+                    "attribute__db_model__iexact": self._model,
+                    "attribute__db_attrtype": self._attrtype,
+                    "attribute__db_key__iexact": key.lower(),
+                    "attribute__db_category__iexact": category.lower() if category else None,
+                }
                 if not self.obj.pk:
                     return []
                 conn = getattr(self.obj, self._m2m_fieldname).through.objects.filter(**query)
@@ -304,12 +333,18 @@ class AttributeHandler(object):
                 return [attr for key, attr in self._cache.items() if key.endswith(catkey) and attr]
             else:
                 # we have to query to make this category up-date in the cache
-                query = {"%s__id" % self._model: self._objid,
-                         "attribute__db_model__iexact": self._model,
-                         "attribute__db_attrtype": self._attrtype,
-                         "attribute__db_category__iexact": category.lower() if category else None}
-                attrs = [conn.attribute for conn
-                         in getattr(self.obj, self._m2m_fieldname).through.objects.filter(**query)]
+                query = {
+                    "%s__id" % self._model: self._objid,
+                    "attribute__db_model__iexact": self._model,
+                    "attribute__db_attrtype": self._attrtype,
+                    "attribute__db_category__iexact": category.lower() if category else None,
+                }
+                attrs = [
+                    conn.attribute
+                    for conn in getattr(self.obj, self._m2m_fieldname).through.objects.filter(
+                        **query
+                    )
+                ]
                 for attr in attrs:
                     if attr.pk:
                         cachekey = "%s-%s" % (attr.db_key, category)
@@ -351,8 +386,11 @@ class AttributeHandler(object):
             cachekey = "%s-%s" % (key, category)
             self._cache.pop(cachekey, None)
         else:
-            self._cache = {key: attrobj for key, attrobj in
-                           self._cache.items() if not key.endswith(catkey)}
+            self._cache = {
+                key: attrobj
+                for key, attrobj in list(self._cache.items())
+                if not key.endswith(catkey)
+            }
         # mark that the category cache is no longer up-to-date
         self._catcache.pop(catkey, None)
         self._cache_complete = False
@@ -383,13 +421,24 @@ class AttributeHandler(object):
 
         """
         ret = []
+        category = category.strip().lower() if category is not None else None
         for keystr in make_iter(key):
+            keystr = key.strip().lower()
             ret.extend(bool(attr) for attr in self._getcache(keystr, category))
         return ret[0] if len(ret) == 1 else ret
 
-    def get(self, key=None, default=None, category=None, return_obj=False,
-            strattr=False, raise_exception=False, accessing_obj=None,
-            default_access=True, return_list=False):
+    def get(
+        self,
+        key=None,
+        default=None,
+        category=None,
+        return_obj=False,
+        strattr=False,
+        raise_exception=False,
+        accessing_obj=None,
+        default_access=True,
+        return_list=False,
+    ):
         """
         Get the Attribute.
 
@@ -418,24 +467,17 @@ class AttributeHandler(object):
             return_list (bool, optional):
 
         Returns:
-            result (any or list): One or more matches for keys and/or categories. Each match will be
-                the value of the found Attribute(s) unless `return_obj` is True, at which point it
-                will be the attribute object itself or None. If `return_list` is True, this will
-                always be a list, regardless of the number of elements.
+            result (any or list): One or more matches for keys and/or
+                categories. Each match will be the value of the found Attribute(s)
+                unless `return_obj` is True, at which point it will be the
+                attribute object itself or None. If `return_list` is True, this
+                will always be a list, regardless of the number of elements.
 
         Raises:
             AttributeError: If `raise_exception` is set and no matching Attribute
                 was found matching `key`.
 
         """
-
-        class RetDefault(object):
-            """Holds default values"""
-
-            def __init__(self):
-                self.key = None
-                self.value = default
-                self.strvalue = str(default) if default is not None else None
 
         ret = []
         for keystr in make_iter(key):
@@ -447,13 +489,14 @@ class AttributeHandler(object):
                 raise AttributeError
             elif return_obj:
                 ret.append(None)
-            else:
-                ret.append(RetDefault())
 
         if accessing_obj:
             # check 'attrread' locks
-            ret = [attr for attr in ret if attr.access(accessing_obj,
-                                                       self._attrread, default=default_access)]
+            ret = [
+                attr
+                for attr in ret
+                if attr.access(accessing_obj, self._attrread, default=default_access)
+            ]
         if strattr:
             ret = ret if return_obj else [attr.strvalue for attr in ret if attr]
         else:
@@ -461,12 +504,18 @@ class AttributeHandler(object):
 
         if return_list:
             return ret if ret else [default] if default is not None else []
-        elif not ret:
-            return ret if len(key) > 1 else default
-        return ret[0] if len(ret) == 1 else ret
+        return ret[0] if ret and len(ret) == 1 else ret or default
 
-    def add(self, key, value, category=None, lockstring="",
-            strattr=False, accessing_obj=None, default_access=True):
+    def add(
+        self,
+        key,
+        value,
+        category=None,
+        lockstring="",
+        strattr=False,
+        accessing_obj=None,
+        default_access=True,
+    ):
         """
         Add attribute to object, with optional `lockstring`.
 
@@ -488,8 +537,9 @@ class AttributeHandler(object):
                 `attrcreate` is defined on the Attribute in question.
 
         """
-        if accessing_obj and not self.obj.access(accessing_obj, self._attrcreate,
-                                                 default=default_access):
+        if accessing_obj and not self.obj.access(
+            accessing_obj, self._attrcreate, default=default_access
+        ):
             # check create access
             return
 
@@ -512,12 +562,14 @@ class AttributeHandler(object):
                 attr_obj.value = value
         else:
             # create a new Attribute (no OOB handlers can be notified)
-            kwargs = {"db_key": keystr,
-                      "db_category": category,
-                      "db_model": self._model,
-                      "db_attrtype": self._attrtype,
-                      "db_value": None if strattr else to_pickle(value),
-                      "db_strvalue": value if strattr else None}
+            kwargs = {
+                "db_key": keystr,
+                "db_category": category,
+                "db_model": self._model,
+                "db_attrtype": self._attrtype,
+                "db_value": None if strattr else to_pickle(value),
+                "db_strvalue": value if strattr else None,
+            }
             new_attr = Attribute(**kwargs)
             new_attr.save()
             getattr(self.obj, self._m2m_fieldname).add(new_attr)
@@ -530,8 +582,8 @@ class AttributeHandler(object):
         repeat-calling add when having many Attributes to add.
 
         Args:
-            indata (tuple): Tuples of varying length representing the
-                Attribute to add to this object.
+            indata (list): List of tuples of varying length representing the
+                Attribute to add to this object. Supported tuples are
                     - `(key, value)`
                     - `(key, value, category)`
                     - `(key, value, category, lockstring)`
@@ -556,14 +608,14 @@ class AttributeHandler(object):
 
         """
         new_attrobjs = []
-        strattr = kwargs.get('strattr', False)
+        strattr = kwargs.get("strattr", False)
         for tup in args:
             if not is_iter(tup) or len(tup) < 2:
                 raise RuntimeError("batch_add requires iterables as arguments (got %r)." % tup)
             ntup = len(tup)
             keystr = str(tup[0]).strip().lower()
             new_value = tup[1]
-            category = str(tup[2]).strip().lower() if ntup > 2 else None
+            category = str(tup[2]).strip().lower() if ntup > 2 and tup[2] is not None else None
             lockstring = tup[3] if ntup > 3 else ""
 
             attr_objs = self._getcache(keystr, category)
@@ -572,7 +624,7 @@ class AttributeHandler(object):
                 attr_obj = attr_objs[0]
                 # update an existing attribute object
                 attr_obj.db_category = category
-                attr_obj.db_lock_storage = lockstring
+                attr_obj.db_lock_storage = lockstring or ""
                 attr_obj.save(update_fields=["db_category", "db_lock_storage"])
                 if strattr:
                     # store as a simple string (will not notify OOB handlers)
@@ -583,13 +635,15 @@ class AttributeHandler(object):
                     attr_obj.value = new_value
             else:
                 # create a new Attribute (no OOB handlers can be notified)
-                kwargs = {"db_key": keystr,
-                          "db_category": category,
-                          "db_model": self._model,
-                          "db_attrtype": self._attrtype,
-                          "db_value": None if strattr else to_pickle(new_value),
-                          "db_strvalue": new_value if strattr else None,
-                          "db_lock_storage": lockstring}
+                kwargs = {
+                    "db_key": keystr,
+                    "db_category": category,
+                    "db_model": self._model,
+                    "db_attrtype": self._attrtype,
+                    "db_value": None if strattr else to_pickle(new_value),
+                    "db_strvalue": new_value if strattr else None,
+                    "db_lock_storage": lockstring or "",
+                }
                 new_attr = Attribute(**kwargs)
                 new_attr.save()
                 new_attrobjs.append(new_attr)
@@ -598,13 +652,21 @@ class AttributeHandler(object):
             # Add new objects to m2m field all at once
             getattr(self.obj, self._m2m_fieldname).add(*new_attrobjs)
 
-    def remove(self, key, raise_exception=False, category=None,
-               accessing_obj=None, default_access=True):
+    def remove(
+        self,
+        key=None,
+        raise_exception=False,
+        category=None,
+        accessing_obj=None,
+        default_access=True,
+    ):
         """
         Remove attribute or a list of attributes from object.
 
         Args:
-            key (str): An Attribute key to remove.
+            key (str or list, optional): An Attribute key to remove or a list of keys. If
+                multiple keys, they must all be of the same `category`. If None and
+                category is not given, remove all Attributes.
             raise_exception (bool, optional): If set, not finding the
                 Attribute to delete will raise an exception instead of
                 just quietly failing.
@@ -621,22 +683,36 @@ class AttributeHandler(object):
             AttributeError: If `raise_exception` is set and no matching Attribute
                 was found matching `key`.
 
+        Notes:
+            If neither key nor category is given, this acts as clear().
+
         """
+
+        if key is None:
+            self.clear(
+                category=category, accessing_obj=accessing_obj, default_access=default_access
+            )
+            return
+
+        category = category.strip().lower() if category is not None else None
+
         for keystr in make_iter(key):
+            keystr = keystr.lower()
+
             attr_objs = self._getcache(keystr, category)
             for attr_obj in attr_objs:
                 if not (
-                    accessing_obj and not attr_obj.access(
-                        accessing_obj,
-                        self._attredit,
-                        default=default_access)):
+                    accessing_obj
+                    and not attr_obj.access(accessing_obj, self._attredit, default=default_access)
+                ):
                     try:
                         attr_obj.delete()
                     except AssertionError:
+                        print("Assertionerror for attr.delete()")
                         # this happens if the attr was already deleted
                         pass
                     finally:
-                        self._delcache(key, category)
+                        self._delcache(keystr, category)
             if not attr_objs and raise_exception:
                 raise AttributeError
 
@@ -654,20 +730,31 @@ class AttributeHandler(object):
                 type `attredit` on the Attribute in question.
 
         """
+        category = category.strip().lower() if category is not None else None
+
         if not self._cache_complete:
             self._fullcache()
-        if accessing_obj:
-            [attr.delete() for attr in self._cache.values()
-             if attr and attr.access(accessing_obj, self._attredit, default=default_access)]
+
+        if category is not None:
+            attrs = [attr for attr in self._cache.values() if attr.category == category]
         else:
-            [attr.delete() for attr in self._cache.values() if attr and attr.pk]
+            attrs = self._cache.values()
+
+        if accessing_obj:
+            [
+                attr.delete()
+                for attr in attrs
+                if attr and attr.access(accessing_obj, self._attredit, default=default_access)
+            ]
+        else:
+            [attr.delete() for attr in attrs if attr and attr.pk]
         self._cache = {}
         self._catcache = {}
         self._cache_complete = False
 
     def all(self, accessing_obj=None, default_access=True):
         """
-        Return all Attribute objects on this object.
+        Return all Attribute objects on this object, regardless of category.
 
         Args:
             accessing_obj (object, optional): Check the `attrread`
@@ -684,11 +771,13 @@ class AttributeHandler(object):
         """
         if not self._cache_complete:
             self._fullcache()
-        attrs = sorted([attr for attr in self._cache.values() if attr],
-                       key=lambda o: o.id)
+        attrs = sorted([attr for attr in self._cache.values() if attr], key=lambda o: o.id)
         if accessing_obj:
-            return [attr for attr in attrs
-                    if attr.access(accessing_obj, self._attredit, default=default_access)]
+            return [
+                attr
+                for attr in attrs
+                if attr.access(accessing_obj, self._attredit, default=default_access)
+            ]
         else:
             return attrs
 
@@ -755,7 +844,9 @@ def initialize_nick_templates(in_template, out_template):
     # create the regex for in_template
     regex_string = fnmatch.translate(in_template)
     # we must account for a possible line break coming over the wire
-    regex_string = regex_string[:-7] + r"(?:[\n\r]*?)\Z(?ms)"
+
+    # NOTE-PYTHON3: fnmatch.translate format changed since Python2
+    regex_string = regex_string[:-2] + r"(?:[\n\r]*?)\Z"
 
     # validate the templates
     regex_args = [match.group(2) for match in _RE_NICK_ARG.finditer(regex_string)]
@@ -764,7 +855,7 @@ def initialize_nick_templates(in_template, out_template):
         # We don't have the same $-tags in input/output.
         raise NickTemplateInvalid
 
-    regex_string = _RE_NICK_SPACE.sub("\s+", regex_string)
+    regex_string = _RE_NICK_SPACE.sub(r"\\s+", regex_string)
     regex_string = _RE_NICK_ARG.sub(lambda m: "(?P<arg%s>.+?)" % m.group(2), regex_string)
     template_string = _RE_NICK_TEMPLATE_ARG.sub(lambda m: "{arg%s}" % m.group(2), out_template)
 
@@ -797,10 +888,11 @@ class NickHandler(AttributeHandler):
     They also always use the `strvalue` fields for their data.
 
     """
+
     _attrtype = "nick"
 
     def __init__(self, *args, **kwargs):
-        super(NickHandler, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._regex_cache = {}
 
     def has(self, key, category="inputline"):
@@ -816,7 +908,7 @@ class NickHandler(AttributeHandler):
                 is a list of booleans.
 
         """
-        return super(NickHandler, self).has(key, category=category)
+        return super().has(key, category=category)
 
     def get(self, key=None, category="inputline", return_tuple=False, **kwargs):
         """
@@ -836,12 +928,15 @@ class NickHandler(AttributeHandler):
 
         """
         if return_tuple or "return_obj" in kwargs:
-            return super(NickHandler, self).get(key=key, category=category, **kwargs)
+            return super().get(key=key, category=category, **kwargs)
         else:
-            retval = super(NickHandler, self).get(key=key, category=category, **kwargs)
+            retval = super().get(key=key, category=category, **kwargs)
             if retval:
-                return retval[3] if isinstance(retval, tuple) else \
-                    [tup[3] for tup in make_iter(retval)]
+                return (
+                    retval[3]
+                    if isinstance(retval, tuple)
+                    else [tup[3] for tup in make_iter(retval)]
+                )
             return None
 
     def add(self, key, replacement, category="inputline", **kwargs):
@@ -861,8 +956,7 @@ class NickHandler(AttributeHandler):
             nick_regex, nick_template = initialize_nick_templates(key + " $1", replacement + " $1")
         else:
             nick_regex, nick_template = initialize_nick_templates(key, replacement)
-        super(NickHandler, self).add(key, (nick_regex, nick_template, key, replacement),
-                                     category=category, **kwargs)
+        super().add(key, (nick_regex, nick_template, key, replacement), category=category, **kwargs)
 
     def remove(self, key, category="inputline", **kwargs):
         """
@@ -876,7 +970,7 @@ class NickHandler(AttributeHandler):
             kwargs (any, optional): These are passed on to `AttributeHandler.get`.
 
         """
-        super(NickHandler, self).remove(key, category=category, **kwargs)
+        super().remove(key, category=category, **kwargs)
 
     def nickreplace(self, raw_string, categories=("inputline", "channel"), include_account=True):
         """
@@ -899,13 +993,25 @@ class NickHandler(AttributeHandler):
         """
         nicks = {}
         for category in make_iter(categories):
-            nicks.update({nick.key: nick for nick in make_iter(
-                self.get(category=category, return_obj=True)) if nick and nick.key})
+            nicks.update(
+                {
+                    nick.key: nick
+                    for nick in make_iter(self.get(category=category, return_obj=True))
+                    if nick and nick.key
+                }
+            )
         if include_account and self.obj.has_account:
             for category in make_iter(categories):
-                nicks.update({nick.key: nick for nick in make_iter(self.obj.account.nicks.get(
-                    category=category, return_obj=True)) if nick and nick.key})
-        for key, nick in nicks.iteritems():
+                nicks.update(
+                    {
+                        nick.key: nick
+                        for nick in make_iter(
+                            self.obj.account.nicks.get(category=category, return_obj=True)
+                        )
+                        if nick and nick.key
+                    }
+                )
+        for key, nick in nicks.items():
             nick_regex, template, _, _ = nick.value
             regex = self._regex_cache.get(nick_regex)
             if not regex:

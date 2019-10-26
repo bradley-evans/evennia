@@ -8,8 +8,7 @@ login procedure of the game, tracks sessions etc.
 Using standard ssh client,
 
 """
-from __future__ import print_function
-from builtins import object
+
 import os
 import re
 
@@ -20,7 +19,7 @@ from twisted.conch.interfaces import IConchUser
 _SSH_IMPORT_ERROR = """
 ERROR: Missing crypto library for SSH. Install it with
 
-       pip install cryptography pyasn1
+       pip install cryptography pyasn1 bcrypt
 
 (On older Twisted versions you may have to do 'pip install pycrypto pyasn1' instead).
 
@@ -39,7 +38,7 @@ from twisted.conch.ssh import common
 from twisted.conch.insults import insults
 from twisted.conch.manhole_ssh import TerminalRealm, _Glue, ConchFactory
 from twisted.conch.manhole import Manhole, recvline
-from twisted.internet import defer
+from twisted.internet import defer, protocol
 from twisted.conch import interfaces as iconch
 from twisted.python import components
 from django.conf import settings
@@ -50,16 +49,18 @@ from evennia.utils import ansi
 from evennia.utils.utils import to_str
 
 _RE_N = re.compile(r"\|n$")
-_RE_SCREENREADER_REGEX = re.compile(r"%s" % settings.SCREENREADER_REGEX_STRIP, re.DOTALL + re.MULTILINE)
+_RE_SCREENREADER_REGEX = re.compile(
+    r"%s" % settings.SCREENREADER_REGEX_STRIP, re.DOTALL + re.MULTILINE
+)
 _GAME_DIR = settings.GAME_DIR
 _PRIVATE_KEY_FILE = os.path.join(_GAME_DIR, "server", "ssh-private.key")
 _PUBLIC_KEY_FILE = os.path.join(_GAME_DIR, "server", "ssh-public.key")
 _KEY_LENGTH = 2048
 
-CTRL_C = '\x03'
-CTRL_D = '\x04'
-CTRL_BACKSLASH = '\x1c'
-CTRL_L = '\x0c'
+CTRL_C = "\x03"
+CTRL_D = "\x04"
+CTRL_BACKSLASH = "\x1c"
+CTRL_L = "\x0c"
 
 _NO_AUTOGEN = """
 Evennia could not generate SSH private- and public keys ({{err}})
@@ -69,7 +70,18 @@ If this error persists, create the keys manually (using the tools for your OS)
 and put them here:
     {}
     {}
-""".format(_PRIVATE_KEY_FILE, _PUBLIC_KEY_FILE)
+""".format(
+    _PRIVATE_KEY_FILE, _PUBLIC_KEY_FILE
+)
+
+
+# not used atm
+class SSHServerFactory(protocol.ServerFactory):
+    "This is only to name this better in logs"
+    noisy = False
+
+    def logPrefix(self):
+        return "SSH"
 
 
 class SshProtocol(Manhole, session.Session):
@@ -79,6 +91,7 @@ class SshProtocol(Manhole, session.Session):
     here.
 
     """
+
     noisy = False
 
     def __init__(self, starttuple):
@@ -154,7 +167,7 @@ class SshProtocol(Manhole, session.Session):
 
         """
         if self.lineBuffer:
-            self.terminal.write('\a')
+            self.terminal.write("\a")
         else:
             self.handle_QUIT()
 
@@ -221,7 +234,7 @@ class SshProtocol(Manhole, session.Session):
             string (str): Output text.
 
         """
-        for line in string.split('\n'):
+        for line in string.split("\n"):
             # the telnet-specific method for sending
             self.terminal.write(line)
             self.terminal.nextLine()
@@ -243,7 +256,7 @@ class SshProtocol(Manhole, session.Session):
 
         """
         if reason:
-            self.data_out(text=((reason, ), {}))
+            self.data_out(text=((reason,), {}))
         self.connectionLost(reason)
 
     def data_out(self, **kwargs):
@@ -281,13 +294,13 @@ class SshProtocol(Manhole, session.Session):
         text = args[0] if args else ""
         if text is None:
             return
-        text = to_str(text, force_string=True)
+        text = to_str(text)
 
         # handle arguments
         options = kwargs.get("options", {})
         flags = self.protocol_flags
-        xterm256 = options.get("xterm256", flags.get('XTERM256', True))
-        useansi = options.get("ansi", flags.get('ANSI', True))
+        xterm256 = options.get("xterm256", flags.get("XTERM256", True))
+        useansi = options.get("ansi", flags.get("ANSI", True))
         raw = options.get("raw", flags.get("RAW", False))
         nocolor = options.get("nocolor", flags.get("NOCOLOR") or not (xterm256 or useansi))
         # echo = options.get("echo", None)  # DEBUG
@@ -305,8 +318,12 @@ class SshProtocol(Manhole, session.Session):
         else:
             # we need to make sure to kill the color at the end in order
             # to match the webclient output.
-            linetosend = ansi.parse_ansi(_RE_N.sub("", text) + ("||n" if text.endswith("|") else "|n"),
-                                         strip_ansi=nocolor, xterm256=xterm256, mxp=False)
+            linetosend = ansi.parse_ansi(
+                _RE_N.sub("", text) + ("||n" if text.endswith("|") else "|n"),
+                strip_ansi=nocolor,
+                xterm256=xterm256,
+                mxp=False,
+            )
             self.sendLine(linetosend)
 
     def send_prompt(self, *args, **kwargs):
@@ -334,8 +351,7 @@ class ExtraInfoAuthServer(SSHUserAuthServer):
         password = common.getNS(packet[1:])[0]
         c = credentials.UsernamePassword(self.user, password)
         c.transport = self.transport
-        return self.portal.login(c, None, IConchUser).addErrback(
-            self._ebPassword)
+        return self.portal.login(c, None, IConchUser).addErrback(self._ebPassword)
 
 
 class AccountDBPasswordChecker(object):
@@ -345,6 +361,7 @@ class AccountDBPasswordChecker(object):
     useful for the Realm.
 
     """
+
     noisy = False
     credentialInterfaces = (credentials.IUsernamePassword,)
 
@@ -357,7 +374,7 @@ class AccountDBPasswordChecker(object):
 
         """
         self.factory = factory
-        super(AccountDBPasswordChecker, self).__init__()
+        super().__init__()
 
     def requestAvatarId(self, c):
         """
@@ -414,9 +431,12 @@ class TerminalSessionTransport_getPeer(object):
         session = self.proto.session
 
         self.proto.makeConnection(
-            _Glue(write=self.chainedProtocol.dataReceived,
-                  loseConnection=lambda: avatar.conn.sendClose(session),
-                  name="SSH Proto Transport"))
+            _Glue(
+                write=self.chainedProtocol.dataReceived,
+                loseConnection=lambda: avatar.conn.sendClose(session),
+                name="SSH Proto Transport",
+            )
+        )
 
         def loseConnection():
             self.proto.loseConnection()
@@ -425,9 +445,13 @@ class TerminalSessionTransport_getPeer(object):
             return session.conn.transport.transport.getPeer()
 
         self.chainedProtocol.makeConnection(
-            _Glue(getPeer=getPeer, write=self.proto.write,
-                  loseConnection=loseConnection,
-                  name="Chained Proto Transport"))
+            _Glue(
+                getPeer=getPeer,
+                write=self.proto.write,
+                loseConnection=loseConnection,
+                name="Chained Proto Transport",
+            )
+        )
 
         self.chainedProtocol.terminalProtocol.terminalSize(width, height)
 
@@ -447,10 +471,10 @@ def getKeyPair(pubkeyfile, privkeyfile):
         private_key_string = rsa_key.toString(type="OPENSSH")
 
         # save keys for the future.
-        with open(privkeyfile, 'wt') as pfile:
+        with open(privkeyfile, "wt") as pfile:
             pfile.write(private_key_string)
             print("Created SSH private key in '{}'".format(_PRIVATE_KEY_FILE))
-        with open(pubkeyfile, 'wt') as pfile:
+        with open(pubkeyfile, "wt") as pfile:
             pfile.write(public_key_string)
             print("Created SSH public key in '{}'".format(_PUBLIC_KEY_FILE))
     else:
@@ -466,28 +490,30 @@ def makeFactory(configdict):
     """
     Creates the ssh server factory.
     """
+
     def chainProtocolFactory(username=None):
         return insults.ServerProtocol(
-            configdict['protocolFactory'],
-            *configdict.get('protocolConfigdict', (username,)),
-            **configdict.get('protocolKwArgs', {}))
+            configdict["protocolFactory"],
+            *configdict.get("protocolConfigdict", (username,)),
+            **configdict.get("protocolKwArgs", {}),
+        )
 
     rlm = PassAvatarIdTerminalRealm()
     rlm.transportFactory = TerminalSessionTransport_getPeer
     rlm.chainedProtocolFactory = chainProtocolFactory
     factory = ConchFactory(Portal(rlm))
-    factory.sessionhandler = configdict['sessions']
+    factory.sessionhandler = configdict["sessions"]
 
     try:
         # create/get RSA keypair
         publicKey, privateKey = getKeyPair(_PUBLIC_KEY_FILE, _PRIVATE_KEY_FILE)
-        factory.publicKeys = {'ssh-rsa': publicKey}
-        factory.privateKeys = {'ssh-rsa': privateKey}
+        factory.publicKeys = {b"ssh-rsa": publicKey}
+        factory.privateKeys = {b"ssh-rsa": privateKey}
     except Exception as err:
         print(_NO_AUTOGEN.format(err=err))
 
     factory.services = factory.services.copy()
-    factory.services['ssh-userauth'] = ExtraInfoAuthServer
+    factory.services["ssh-userauth"] = ExtraInfoAuthServer
 
     factory.portal.registerChecker(AccountDBPasswordChecker(factory))
 

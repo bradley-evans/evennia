@@ -7,27 +7,31 @@ all Attributes and TypedObjects).
 import shlex
 from django.db.models import Q
 from evennia.utils import idmapper
-from evennia.utils.utils import make_iter, variable_from_module, to_unicode
+from evennia.utils.utils import make_iter, variable_from_module
 from evennia.typeclasses.attributes import Attribute
 from evennia.typeclasses.tags import Tag
 
-__all__ = ("TypedObjectManager", )
+__all__ = ("TypedObjectManager",)
 _GA = object.__getattribute__
 _Tag = None
 
 
 # Managers
 
+
 class TypedObjectManager(idmapper.manager.SharedMemoryManager):
     """
     Common ObjectManager for all dbobjects.
 
     """
+
     # common methods for all typed managers. These are used
     # in other methods. Returns querysets.
 
     # Attribute manager methods
-    def get_attribute(self, key=None, category=None, value=None, strvalue=None, obj=None, attrtype=None):
+    def get_attribute(
+        self, key=None, category=None, value=None, strvalue=None, obj=None, attrtype=None
+    ):
         """
         Return Attribute objects by key, by category, by value, by
         strvalue, by object (it is stored on) or with a combination of
@@ -69,8 +73,10 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
             # no reason to make strvalue/value mutually exclusive at this level
             query.append(("attribute__db_value", value))
         return Attribute.objects.filter(
-            pk__in=self.model.db_attributes.through.objects.filter(
-                **dict(query)).values_list("attribute_id", flat=True))
+            pk__in=self.model.db_attributes.through.objects.filter(**dict(query)).values_list(
+                "attribute_id", flat=True
+            )
+        )
 
     def get_nick(self, key=None, category=None, value=None, strvalue=None, obj=None):
         """
@@ -91,7 +97,9 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
             nicks (list): The matching Nicks.
 
         """
-        return self.get_attribute(key=key, category=category, value=value, strvalue=strvalue, obj=obj)
+        return self.get_attribute(
+            key=key, category=category, value=value, strvalue=strvalue, obj=obj
+        )
 
     def get_by_attribute(self, key=None, category=None, value=None, strvalue=None, attrtype=None):
         """
@@ -193,8 +201,10 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
             if category:
                 query.append(("tag__db_category", category))
             return Tag.objects.filter(
-                pk__in=self.model.db_tags.through.objects.filter(
-                    **dict(query)).values_list("tag_id", flat=True))
+                pk__in=self.model.db_tags.through.objects.filter(**dict(query)).values_list(
+                    "tag_id", flat=True
+                )
+            )
 
     def get_permission(self, key=None, category=None, obj=None):
         """
@@ -228,25 +238,64 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
 
     def get_by_tag(self, key=None, category=None, tagtype=None):
         """
-        Return objects having tags with a given key or category or
-        combination of the two.
+        Return objects having tags with a given key or category or combination of the two.
+        Also accepts multiple tags/category/tagtype
 
         Args:
-            key (str, optional): Tag key. Not case sensitive.
-            category (str, optional): Tag category. Not case sensitive.
-            tagtype (str or None, optional): 'type' of Tag, by default
+            key (str or list, optional): Tag key or list of keys. Not case sensitive.
+            category (str or list, optional): Tag category. Not case sensitive. If `key` is
+                a list, a single category can either apply to all keys in that list or this
+                must be a list matching the `key` list element by element. If no `key` is given,
+                all objects with tags of this category are returned.
+            tagtype (str, optional): 'type' of Tag, by default
                 this is either `None` (a normal Tag), `alias` or
-                `permission`.
+                `permission`. This always apply to all queried tags.
+
         Returns:
             objects (list): Objects with matching tag.
+
+        Raises:
+            IndexError: If `key` and `category` are both lists and `category` is shorter
+                than `key`.
+
         """
+        if not (key or category):
+            return []
+
+        keys = make_iter(key) if key else []
+        categories = make_iter(category) if category else []
+        n_keys = len(keys)
+        n_categories = len(categories)
+
         dbmodel = self.model.__dbclass__.__name__.lower()
-        query = [("db_tags__db_tagtype", tagtype), ("db_tags__db_model", dbmodel)]
-        if key:
-            query.append(("db_tags__db_key", key.lower()))
-        if category:
-            query.append(("db_tags__db_category", category.lower()))
-        return self.filter(**dict(query))
+        query = (
+            self.filter(db_tags__db_tagtype__iexact=tagtype, db_tags__db_model__iexact=dbmodel)
+            .distinct()
+            .order_by("id")
+        )
+
+        if n_keys > 0:
+            # keys and/or categories given
+            if n_categories == 0:
+                categories = [None for _ in range(n_keys)]
+            elif n_categories == 1 and n_keys > 1:
+                cat = categories[0]
+                categories = [cat for _ in range(n_keys)]
+            elif 1 < n_categories < n_keys:
+                raise IndexError(
+                    "get_by_tag needs a single category or a list of categories "
+                    "the same length as the list of tags."
+                )
+            for ikey, key in enumerate(keys):
+                query = query.filter(
+                    db_tags__db_key__iexact=key, db_tags__db_category__iexact=categories[ikey]
+                )
+        else:
+            # only one or more categories given
+            for category in categories:
+                query = query.filter(db_tags__db_category__iexact=category)
+
+        return query
 
     def get_by_permission(self, key=None, category=None):
         """
@@ -302,8 +351,7 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
         # try to get old tag
 
         dbmodel = self.model.__dbclass__.__name__.lower()
-        tag = self.get_tag(key=key, category=category, tagtype=tagtype,
-                           global_search=True)
+        tag = self.get_tag(key=key, category=category, tagtype=tagtype, global_search=True)
         if tag and data is not None:
             # get tag from list returned by get_tag
             tag = tag[0]
@@ -320,7 +368,8 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
                 db_category=category.strip().lower() if category and key is not None else None,
                 db_data=data,
                 db_model=dbmodel,
-                db_tagtype=tagtype.strip().lower() if tagtype is not None else None)
+                db_tagtype=tagtype.strip().lower() if tagtype is not None else None,
+            )
             tag.save()
         return make_iter(tag)[0]
 
@@ -341,10 +390,10 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
             either a string '#N' or an integer N.
 
         """
-        if reqhash and not (isinstance(dbref, basestring) and dbref.startswith("#")):
+        if reqhash and not (isinstance(dbref, str) and dbref.startswith("#")):
             return None
-        if isinstance(dbref, basestring):
-            dbref = dbref.lstrip('#')
+        if isinstance(dbref, str):
+            dbref = dbref.lstrip("#")
         try:
             if int(dbref) < 0:
                 return None
@@ -396,7 +445,7 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
                 the given dbref ranges.
 
         """
-        retval = super(TypedObjectManager, self).all()
+        retval = super().all()
         if min_dbref is not None:
             retval = retval.filter(id__gte=self.dbref(min_dbref, reqhash=False))
         if max_dbref is not None:
@@ -415,10 +464,9 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
 
         """
         dbtotals = {}
-        typeclass_paths = set(self.values_list('db_typeclass_path', flat=True))
+        typeclass_paths = set(self.values_list("db_typeclass_path", flat=True))
         for typeclass_path in typeclass_paths:
-            dbtotals[typeclass_path] = \
-                self.filter(db_typeclass_path=typeclass_path).count()
+            dbtotals[typeclass_path] = self.filter(db_typeclass_path=typeclass_path).count()
         return dbtotals
 
     def typeclass_search(self, typeclass, include_children=False, include_parents=False):
@@ -444,7 +492,7 @@ class TypedObjectManager(idmapper.manager.SharedMemoryManager):
         if callable(typeclass):
             cls = typeclass.__class__
             typeclass = "%s.%s" % (cls.__module__, cls.__name__)
-        elif not isinstance(typeclass, basestring) and hasattr(typeclass, "path"):
+        elif not isinstance(typeclass, str) and hasattr(typeclass, "path"):
             typeclass = typeclass.path
 
         # query objects of exact typeclass
@@ -500,35 +548,35 @@ class TypeclassManager(TypedObjectManager):
 
         """
         # shlex splits by spaces unless escaped by quotes
-        querysplit = shlex.split(to_unicode(query, force_string=True))
+        querysplit = shlex.split(query)
         queries, plustags, plusattrs, negtags, negattrs = [], [], [], [], []
         for ipart, part in enumerate(querysplit):
             key, rest = part, ""
             if ":" in part:
-                key, rest = part.split(':', 1)
+                key, rest = part.split(":", 1)
             # tags are on the form tag or tag:category
-            if key.startswith('tag=='):
+            if key.startswith("tag=="):
                 plustags.append((key[5:], rest))
                 continue
-            elif key.startswith('tag!='):
+            elif key.startswith("tag!="):
                 negtags.append((key[5:], rest))
                 continue
             # attrs are on the form attr:value or attr:value:category
             elif rest:
                 value, category = rest, ""
                 if ":" in rest:
-                    value, category = rest.split(':', 1)
-                if key.startswith('attr=='):
+                    value, category = rest.split(":", 1)
+                if key.startswith("attr=="):
                     plusattrs.append((key[7:], value, category))
                     continue
-                elif key.startswith('attr!='):
+                elif key.startswith("attr!="):
                     negattrs.append((key[7:], value, category))
                     continue
             # if we get here, we are entering a key search criterion which
             # we assume is one word.
             queries.append(part)
         # build query from components
-        query = ' '.join(queries)
+        query = " ".join(queries)
         # TODO
 
     def get(self, *args, **kwargs):
@@ -551,7 +599,7 @@ class TypeclassManager(TypedObjectManager):
 
         """
         kwargs.update({"db_typeclass_path": self.model.path})
-        return super(TypeclassManager, self).get(**kwargs)
+        return super().get(**kwargs)
 
     def filter(self, *args, **kwargs):
         """
@@ -569,7 +617,7 @@ class TypeclassManager(TypedObjectManager):
 
         """
         kwargs.update({"db_typeclass_path": self.model.path})
-        return super(TypeclassManager, self).filter(*args, **kwargs)
+        return super().filter(*args, **kwargs)
 
     def all(self):
         """
@@ -579,7 +627,7 @@ class TypeclassManager(TypedObjectManager):
             objects (queryset): The objects found.
 
         """
-        return super(TypeclassManager, self).all().filter(db_typeclass_path=self.model.path)
+        return super().all().filter(db_typeclass_path=self.model.path)
 
     def first(self):
         """
@@ -593,7 +641,7 @@ class TypeclassManager(TypedObjectManager):
                 on the model base used.
 
         """
-        return super(TypeclassManager, self).filter(db_typeclass_path=self.model.path).first()
+        return super().filter(db_typeclass_path=self.model.path).first()
 
     def last(self):
         """
@@ -607,7 +655,7 @@ class TypeclassManager(TypedObjectManager):
                 on the model base used.
 
         """
-        return super(TypeclassManager, self).filter(db_typeclass_path=self.model.path).last()
+        return super().filter(db_typeclass_path=self.model.path).last()
 
     def count(self):
         """
@@ -617,7 +665,55 @@ class TypeclassManager(TypedObjectManager):
             integer : Number of objects found.
 
         """
-        return super(TypeclassManager, self).filter(db_typeclass_path=self.model.path).count()
+        return super().filter(db_typeclass_path=self.model.path).count()
+
+    def annotate(self, *args, **kwargs):
+        """
+        Overload annotate method to filter on typeclass before annotating.
+        Args:
+            *args (any): Positional arguments passed along to queryset annotate method.
+            **kwargs (any): Keyword arguments passed along to queryset annotate method.
+
+        Returns:
+            Annotated queryset.
+        """
+        return (
+            super(TypeclassManager, self)
+            .filter(db_typeclass_path=self.model.path)
+            .annotate(*args, **kwargs)
+        )
+
+    def values(self, *args, **kwargs):
+        """
+        Overload values method to filter on typeclass first.
+        Args:
+            *args (any): Positional arguments passed along to values method.
+            **kwargs (any): Keyword arguments passed along to values method.
+
+        Returns:
+            Queryset of values dictionaries, just filtered by typeclass first.
+        """
+        return (
+            super(TypeclassManager, self)
+            .filter(db_typeclass_path=self.model.path)
+            .values(*args, **kwargs)
+        )
+
+    def values_list(self, *args, **kwargs):
+        """
+        Overload values method to filter on typeclass first.
+        Args:
+            *args (any): Positional arguments passed along to values_list method.
+            **kwargs (any): Keyword arguments passed along to values_list method.
+
+        Returns:
+            Queryset of value_list tuples, just filtered by typeclass first.
+        """
+        return (
+            super(TypeclassManager, self)
+            .filter(db_typeclass_path=self.model.path)
+            .values_list(*args, **kwargs)
+        )
 
     def _get_subclasses(self, cls):
         """
@@ -647,10 +743,11 @@ class TypeclassManager(TypedObjectManager):
                 on the model base used.
 
         """
-        paths = [self.model.path] + ["%s.%s" % (cls.__module__, cls.__name__)
-                                     for cls in self._get_subclasses(self.model)]
+        paths = [self.model.path] + [
+            "%s.%s" % (cls.__module__, cls.__name__) for cls in self._get_subclasses(self.model)
+        ]
         kwargs.update({"db_typeclass_path__in": paths})
-        return super(TypeclassManager, self).get(**kwargs)
+        return super().get(**kwargs)
 
     def filter_family(self, *args, **kwargs):
         """
@@ -668,10 +765,11 @@ class TypeclassManager(TypedObjectManager):
 
         """
         # query, including all subclasses
-        paths = [self.model.path] + ["%s.%s" % (cls.__module__, cls.__name__)
-                                     for cls in self._get_subclasses(self.model)]
+        paths = [self.model.path] + [
+            "%s.%s" % (cls.__module__, cls.__name__) for cls in self._get_subclasses(self.model)
+        ]
         kwargs.update({"db_typeclass_path__in": paths})
-        return super(TypeclassManager, self).filter(*args, **kwargs)
+        return super().filter(*args, **kwargs)
 
     def all_family(self):
         """
@@ -682,6 +780,7 @@ class TypeclassManager(TypedObjectManager):
             objects (list): The objects found.
 
         """
-        paths = [self.model.path] + ["%s.%s" % (cls.__module__, cls.__name__)
-                                     for cls in self._get_subclasses(self.model)]
-        return super(TypeclassManager, self).all().filter(db_typeclass_path__in=paths)
+        paths = [self.model.path] + [
+            "%s.%s" % (cls.__module__, cls.__name__) for cls in self._get_subclasses(self.model)
+        ]
+        return super().all().filter(db_typeclass_path__in=paths)

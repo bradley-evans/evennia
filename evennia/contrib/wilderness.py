@@ -252,7 +252,7 @@ class WildernessScript(DefaultScript):
         for coordinates, room in self.db.rooms.items():
             room.ndb.wildernessscript = self
             room.ndb.active_coordinates = coordinates
-        for item in self.db.itemcoordinates.keys():
+        for item in list(self.db.itemcoordinates.keys()):
             # Items deleted from the wilderness leave None type 'ghosts'
             # that must be cleaned out
             if item is None:
@@ -302,7 +302,7 @@ class WildernessScript(DefaultScript):
             [Object, ]: list of Objects at coordinates
         """
         result = []
-        for item, item_coordinates in self.itemcoordinates.items():
+        for item, item_coordinates in list(self.itemcoordinates.items()):
             # Items deleted from the wilderness leave None type 'ghosts'
             # that must be cleaned out
             if item is None:
@@ -335,8 +335,7 @@ class WildernessScript(DefaultScript):
             self._destroy_room(old_room)
         except KeyError:
             # There is no room yet at new_location
-            if (old_room and not inherits_from(old_room, WildernessRoom)) or \
-               (not old_room):
+            if (old_room and not inherits_from(old_room, WildernessRoom)) or (not old_room):
                 # Obj doesn't originally come from a wilderness room.
                 # We'll create a new one then.
                 room = self._create_room(new_coordinates, obj)
@@ -390,26 +389,30 @@ class WildernessScript(DefaultScript):
             # No more unused rooms...time to make a new one.
 
             # First, create the room
-            room = create_object(typeclass=self.mapprovider.room_typeclass,
-                                 key="Wilderness",
-                                 report_to=report_to)
+            room = create_object(
+                typeclass=self.mapprovider.room_typeclass, key="Wilderness", report_to=report_to
+            )
 
             # Then the exits
-            exits = [("north", "n"),
-                     ("northeast", "ne"),
-                     ("east", "e"),
-                     ("southeast", "se"),
-                     ("south", "s"),
-                     ("southwest", "sw"),
-                     ("west", "w"),
-                     ("northwest", "nw")]
+            exits = [
+                ("north", "n"),
+                ("northeast", "ne"),
+                ("east", "e"),
+                ("southeast", "se"),
+                ("south", "s"),
+                ("southwest", "sw"),
+                ("west", "w"),
+                ("northwest", "nw"),
+            ]
             for key, alias in exits:
-                create_object(typeclass=self.mapprovider.exit_typeclass,
-                              key=key,
-                              aliases=[alias],
-                              location=room,
-                              destination=room,
-                              report_to=report_to)
+                create_object(
+                    typeclass=self.mapprovider.exit_typeclass,
+                    key=key,
+                    aliases=[alias],
+                    location=room,
+                    destination=room,
+                    report_to=report_to,
+                )
 
         room.ndb.active_coordinates = coordinates
         room.ndb.wildernessscript = self
@@ -490,8 +493,7 @@ class WildernessRoom(DefaultRoom):
         Returns:
             name (str)
         """
-        return self.wilderness.mapprovider.get_location_name(
-            self.coordinates)
+        return self.wilderness.mapprovider.get_location_name(self.coordinates)
 
     @property
     def coordinates(self):
@@ -651,8 +653,7 @@ class WildernessExit(DefaultExit):
         """
         return self.wilderness.mapprovider
 
-    def at_traverse_coordinates(self, traversing_object, current_coordinates,
-                                new_coordinates):
+    def at_traverse_coordinates(self, traversing_object, current_coordinates, new_coordinates):
         """
         Called when an object wants to travel from one place inside the
         wilderness to another place inside the wilderness.
@@ -692,22 +693,24 @@ class WildernessExit(DefaultExit):
         current_coordinates = itemcoordinates[traversing_object]
         new_coordinates = get_new_coordinates(current_coordinates, self.key)
 
-        if not self.at_traverse_coordinates(traversing_object,
-                                            current_coordinates,
-                                            new_coordinates):
+        if not self.at_traverse_coordinates(
+            traversing_object, current_coordinates, new_coordinates
+        ):
             return False
 
         if not traversing_object.at_before_move(None):
             return False
-        traversing_object.location.msg_contents("{} leaves to {}".format(
-            traversing_object.key, new_coordinates),
-            exclude=[traversing_object])
+        traversing_object.location.msg_contents(
+            "{} leaves to {}".format(traversing_object.key, new_coordinates),
+            exclude=[traversing_object],
+        )
 
         self.location.wilderness.move_obj(traversing_object, new_coordinates)
 
-        traversing_object.location.msg_contents("{} arrives from {}".format(
-            traversing_object.key, current_coordinates),
-            exclude=[traversing_object])
+        traversing_object.location.msg_contents(
+            "{} arrives from {}".format(traversing_object.key, current_coordinates),
+            exclude=[traversing_object],
+        )
 
         traversing_object.at_after_move(None)
         return True
@@ -719,6 +722,7 @@ class WildernessMapProvider(object):
 
     This is a simple provider that just creates an infinite large grid area.
     """
+
     room_typeclass = WildernessRoom
     exit_typeclass = WildernessExit
 

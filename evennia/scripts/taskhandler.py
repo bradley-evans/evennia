@@ -42,7 +42,7 @@ class TaskHandler(object):
         """
         to_save = False
         value = ServerConfig.objects.conf("delayed_tasks", default={})
-        if isinstance(value, basestring):
+        if isinstance(value, str):
             tasks = dbunserialize(value)
         else:
             tasks = value
@@ -81,9 +81,11 @@ class TaskHandler(object):
             try:
                 dbserialize(callback)
             except (TypeError, AttributeError):
-                raise ValueError("the specified callback {} cannot be pickled. "
-                                 "It must be a top-level function in a module or an "
-                                 "instance method.".format(callback))
+                raise ValueError(
+                    "the specified callback {} cannot be pickled. "
+                    "It must be a top-level function in a module or an "
+                    "instance method.".format(callback)
+                )
             else:
                 safe_callback = callback
 
@@ -112,7 +114,7 @@ class TaskHandler(object):
             # Choose a free task_id
             safe_args = []
             safe_kwargs = {}
-            used_ids = self.tasks.keys()
+            used_ids = list(self.tasks.keys())
             task_id = 1
             while task_id in used_ids:
                 task_id += 1
@@ -122,9 +124,11 @@ class TaskHandler(object):
                 try:
                     dbserialize(arg)
                 except (TypeError, AttributeError):
-                    log_err("The positional argument {} cannot be "
-                            "pickled and will not be present in the arguments "
-                            "fed to the callback {}".format(arg, callback))
+                    log_err(
+                        "The positional argument {} cannot be "
+                        "pickled and will not be present in the arguments "
+                        "fed to the callback {}".format(arg, callback)
+                    )
                 else:
                     safe_args.append(arg)
 
@@ -132,9 +136,11 @@ class TaskHandler(object):
                 try:
                     dbserialize(value)
                 except (TypeError, AttributeError):
-                    log_err("The {} keyword argument {} cannot be "
-                            "pickled and will not be present in the arguments "
-                            "fed to the callback {}".format(key, value, callback))
+                    log_err(
+                        "The {} keyword argument {} cannot be "
+                        "pickled and will not be present in the arguments "
+                        "fed to the callback {}".format(key, value, callback)
+                    )
                 else:
                     safe_kwargs[key] = value
 

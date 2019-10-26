@@ -5,6 +5,7 @@ The custom manager for Scripts.
 from django.db.models import Q
 from evennia.typeclasses.managers import TypedObjectManager, TypeclassManager
 from evennia.utils.utils import make_iter
+
 __all__ = ("ScriptManager",)
 _GA = object.__getattribute__
 
@@ -130,8 +131,7 @@ class ScriptDBManager(TypedObjectManager):
             script.delete()
         return nr_deleted
 
-    def validate(self, scripts=None, obj=None, key=None, dbref=None,
-                 init_mode=None):
+    def validate(self, scripts=None, obj=None, key=None, dbref=None, init_mode=None):
         """
         This will step through the script database and make sure
         all objects run scripts that are still valid in the context
@@ -182,7 +182,7 @@ class ScriptDBManager(TypedObjectManager):
         nr_stopped = 0
 
         if init_mode:
-            if init_mode == 'reset':
+            if init_mode == "reset":
                 # special mode when server starts or object logs in.
                 # This deletes all non-persistent scripts from database
                 nr_stopped += self.remove_non_persistent(obj=obj)
@@ -214,7 +214,7 @@ class ScriptDBManager(TypedObjectManager):
         VALIDATE_ITERATION -= 1
         return nr_started, nr_stopped
 
-    def search_script(self, ostring, obj=None, only_timed=False):
+    def search_script(self, ostring, obj=None, only_timed=False, typeclass=None):
         """
         Search for a particular script.
 
@@ -224,6 +224,7 @@ class ScriptDBManager(TypedObjectManager):
                 this object
             only_timed (bool): Limit search only to scripts that run
                 on a timer.
+            typeclass (class or str): Typeclass or path to typeclass.
 
         """
 
@@ -233,15 +234,26 @@ class ScriptDBManager(TypedObjectManager):
         if dbref or dbref == 0:
             # this is a dbref, try to find the script directly
             dbref_match = self.dbref_search(dbref)
-            if dbref_match and not ((obj and obj != dbref_match.obj) or
-                                    (only_timed and dbref_match.interval)):
+            if dbref_match and not (
+                (obj and obj != dbref_match.obj) or (only_timed and dbref_match.interval)
+            ):
                 return [dbref_match]
+
+        if typeclass:
+            if callable(typeclass):
+                typeclass = "%s.%s" % (typeclass.__module__, typeclass.__name__)
+            else:
+                typeclass = "%s" % typeclass
 
         # not a dbref; normal search
         obj_restriction = obj and Q(db_obj=obj) or Q()
-        timed_restriction = only_timed and Q(interval__gt=0) or Q()
-        scripts = self.filter(timed_restriction & obj_restriction & Q(db_key__iexact=ostring))
+        timed_restriction = only_timed and Q(db_interval__gt=0) or Q()
+        typeclass_restriction = typeclass and Q(db_typeclass_path=typeclass) or Q()
+        scripts = self.filter(
+            timed_restriction & obj_restriction & typeclass_restriction & Q(db_key__iexact=ostring)
+        )
         return scripts
+
     # back-compatibility alias
     script_search = search_script
 
@@ -266,8 +278,10 @@ class ScriptDBManager(TypedObjectManager):
         new_locks = new_locks if new_locks is not None else original_script.db_lock_storage
 
         from evennia.utils import create
-        new_script = create.create_script(typeclass, key=new_key, obj=new_obj,
-                                          locks=new_locks, autostart=True)
+
+        new_script = create.create_script(
+            typeclass, key=new_key, obj=new_obj, locks=new_locks, autostart=True
+        )
         return new_script
 
 

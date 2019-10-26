@@ -2,21 +2,26 @@
 Base typeclass for in-game Channels.
 
 """
+from django.contrib.contenttypes.models import ContentType
+from django.urls import reverse
+from django.utils.text import slugify
+
 from evennia.typeclasses.models import TypeclassBase
 from evennia.comms.models import TempMsg, ChannelDB
 from evennia.comms.managers import ChannelManager
-from evennia.utils import logger
+from evennia.utils import create, logger
 from evennia.utils.utils import make_iter
-from future.utils import with_metaclass
+
 _CHANNEL_HANDLER = None
 
 
-class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
+class DefaultChannel(ChannelDB, metaclass=TypeclassBase):
     """
     This is the base class for all Channel Comms. Inherit from this to
     create different types of communication channels.
 
     """
+
     objects = ChannelManager()
 
     def at_first_save(self):
@@ -26,6 +31,7 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
         the hooks called by this method.
 
         """
+        self.basetype_setup()
         self.at_channel_creation()
         self.attributes.add("log_file", "channel_%s.log" % self.key)
         if hasattr(self, "_createdict"):
@@ -46,17 +52,22 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
             if cdict.get("desc"):
                 self.attributes.add("desc", cdict["desc"])
 
-    def at_channel_creation(self):
-        """
-        Called once, when the channel is first created.
-
-        """
+    def basetype_setup(self):
         # delayed import of the channelhandler
         global _CHANNEL_HANDLER
         if not _CHANNEL_HANDLER:
             from evennia.comms.channelhandler import CHANNEL_HANDLER as _CHANNEL_HANDLER
         # register ourselves with the channelhandler.
         _CHANNEL_HANDLER.add(self)
+
+        self.locks.add("send:all();listen:all();control:perm(Admin)")
+
+    def at_channel_creation(self):
+        """
+        Called once, when the channel is first created.
+
+        """
+        pass
 
     # helper methods, for easy overloading
 
@@ -91,10 +102,16 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
     @property
     def wholist(self):
         subs = self.subscriptions.all()
-        listening = [ob for ob in subs if ob.is_connected and ob not in self.mutelist]
+        muted = list(self.mutelist)
+        listening = [ob for ob in subs if ob.is_connected and ob not in muted]
         if subs:
             # display listening subscribers in bold
-            string = ", ".join([account.key if account not in listening else "|w%s|n" % account.key for account in subs])
+            string = ", ".join(
+                [
+                    account.key if account not in listening else "|w%s|n" % account.key
+                    for account in subs
+                ]
+            )
         else:
             string = "<None>"
         return string
@@ -152,7 +169,7 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
 
         """
         # check access
-        if not self.access(subscriber, 'listen'):
+        if not self.access(subscriber, "listen"):
             return False
         # pre-join hook
         connect = self.pre_join_channel(subscriber)
@@ -193,7 +210,14 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
         self.post_leave_channel(subscriber)
         return True
 
-    def access(self, accessing_obj, access_type='listen', default=False, no_superuser_bypass=False, **kwargs):
+    def access(
+        self,
+        accessing_obj,
+        access_type="listen",
+        default=False,
+        no_superuser_bypass=False,
+        **kwargs,
+    ):
         """
         Determines if another object has permission to access.
 
@@ -210,8 +234,59 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
             return (bool): Result of lock check.
 
         """
-        return self.locks.check(accessing_obj, access_type=access_type,
-                                default=default, no_superuser_bypass=no_superuser_bypass)
+        return self.locks.check(
+            accessing_obj,
+            access_type=access_type,
+            default=default,
+            no_superuser_bypass=no_superuser_bypass,
+        )
+
+    @classmethod
+    def create(cls, key, account=None, *args, **kwargs):
+        """
+        Creates a basic Channel with default parameters, unless otherwise
+        specified or extended.
+
+        Provides a friendlier interface to the utils.create_channel() function.
+
+        Args:
+            key (str): This must be unique.
+            account (Account): Account to attribute this object to.
+
+        Kwargs:
+            aliases (list of str): List of alternative (likely shorter) keynames.
+            description (str): A description of the channel, for use in listings.
+            locks (str): Lockstring.
+            keep_log (bool): Log channel throughput.
+            typeclass (str or class): The typeclass of the Channel (not
+                often used).
+            ip (str): IP address of creator (for object auditing).
+
+        Returns:
+            channel (Channel): A newly created Channel.
+            errors (list): A list of errors in string form, if any.
+
+        """
+        errors = []
+        obj = None
+        ip = kwargs.pop("ip", "")
+
+        try:
+            kwargs["desc"] = kwargs.pop("description", "")
+            kwargs["typeclass"] = kwargs.get("typeclass", cls)
+            obj = create.create_channel(key, *args, **kwargs)
+
+            # Record creator id and creation IP
+            if ip:
+                obj.db.creator_ip = ip
+            if account:
+                obj.db.creator_id = account.id
+
+        except Exception as exc:
+            errors.append("An error occurred while creating this '%s' object." % key)
+            logger.log_err(exc)
+
+        return obj, errors
 
     def delete(self):
         """
@@ -220,12 +295,14 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
         """
         self.attributes.clear()
         self.aliases.clear()
-        super(DefaultChannel, self).delete()
+        super().delete()
         from evennia.comms.channelhandler import CHANNELHANDLER
+
         CHANNELHANDLER.update()
 
-    def message_transform(self, msgobj, emit=False, prefix=True,
-                          sender_strings=None, external=False, **kwargs):
+    def message_transform(
+        self, msgobj, emit=False, prefix=True, sender_strings=None, external=False, **kwargs
+    ):
         """
         Generates the formatted string sent to listeners on a channel.
 
@@ -277,16 +354,29 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
             try:
                 # note our addition of the from_channel keyword here. This could be checked
                 # by a custom account.msg() to treat channel-receives differently.
-                entity.msg(msgobj.message, from_obj=msgobj.senders, options={"from_channel": self.id})
+                entity.msg(
+                    msgobj.message, from_obj=msgobj.senders, options={"from_channel": self.id}
+                )
             except AttributeError as e:
                 logger.log_trace("%s\nCannot send msg to '%s'." % (e, entity))
 
         if msgobj.keep_log:
             # log to file
-            logger.log_file(msgobj.message, self.attributes.get("log_file") or "channel_%s.log" % self.key)
+            logger.log_file(
+                msgobj.message, self.attributes.get("log_file") or "channel_%s.log" % self.key
+            )
 
-    def msg(self, msgobj, header=None, senders=None, sender_strings=None,
-            keep_log=None, online=False, emit=False, external=False):
+    def msg(
+        self,
+        msgobj,
+        header=None,
+        senders=None,
+        sender_strings=None,
+        keep_log=None,
+        online=False,
+        emit=False,
+        external=False,
+    ):
         """
         Send the given message to all accounts connected to channel. Note that
         no permission-checking is done here; it is assumed to have been
@@ -325,7 +415,7 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
 
         """
         senders = make_iter(senders) if senders else []
-        if isinstance(msgobj, basestring):
+        if isinstance(msgobj, str):
             # given msgobj is a string - convert to msgobject (always TempMsg)
             msgobj = TempMsg(senders=senders, header=header, message=msgobj, channels=[self])
         # we store the logging setting for use in distribute_message()
@@ -335,9 +425,9 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
         msgobj = self.pre_send_message(msgobj)
         if not msgobj:
             return False
-        msgobj = self.message_transform(msgobj, emit=emit,
-                                        sender_strings=sender_strings,
-                                        external=external)
+        msgobj = self.message_transform(
+            msgobj, emit=emit, sender_strings=sender_strings, external=external
+        )
         self.distribute_message(msgobj, online=online)
         self.post_send_message(msgobj)
         return True
@@ -371,7 +461,7 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
             prefix (str): The created channel prefix.
 
         """
-        return '' if emit else '[%s] ' % self.key
+        return "" if emit else "[%s] " % self.key
 
     def format_senders(self, senders=None, **kwargs):
         """
@@ -392,8 +482,8 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
 
         """
         if not senders:
-            return ''
-        return ', '.join(senders)
+            return ""
+        return ", ".join(senders)
 
     def pose_transform(self, msgobj, sender_string, **kwargs):
         """
@@ -416,16 +506,16 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
         pose = False
         message = msgobj.message
         message_start = message.lstrip()
-        if message_start.startswith((':', ';')):
+        if message_start.startswith((":", ";")):
             pose = True
             message = message[1:]
-            if not message.startswith((':', "'", ',')):
-                if not message.startswith(' '):
-                    message = ' ' + message
+            if not message.startswith((":", "'", ",")):
+                if not message.startswith(" "):
+                    message = " " + message
         if pose:
-            return '%s%s' % (sender_string, message)
+            return "%s%s" % (sender_string, message)
         else:
-            return '%s: %s' % (sender_string, message)
+            return "%s: %s" % (sender_string, message)
 
     def format_external(self, msgobj, senders, emit=False, **kwargs):
         """
@@ -447,7 +537,7 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
         """
         if emit or not senders:
             return msgobj.message
-        senders = ', '.join(senders)
+        senders = ", ".join(senders)
         return self.pose_transform(msgobj, senders)
 
     def format_message(self, msgobj, emit=False, **kwargs):
@@ -466,14 +556,14 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
         """
         # We don't want to count things like external sources as senders for
         # the purpose of constructing the message string.
-        senders = [sender for sender in msgobj.senders if hasattr(sender, 'key')]
+        senders = [sender for sender in msgobj.senders if hasattr(sender, "key")]
         if not senders:
             emit = True
         if emit:
             return msgobj.message
         else:
             senders = [sender.key for sender in msgobj.senders]
-            senders = ', '.join(senders)
+            senders = ", ".join(senders)
             return self.pose_transform(msgobj, senders)
 
     def pre_join_channel(self, joiner, **kwargs):
@@ -571,3 +661,157 @@ class DefaultChannel(with_metaclass(TypeclassBase, ChannelDB)):
 
         """
         pass
+
+    #
+    # Web/Django methods
+    #
+
+    def web_get_admin_url(self):
+        """
+        Returns the URI path for the Django Admin page for this object.
+
+        ex. Account#1 = '/admin/accounts/accountdb/1/change/'
+
+        Returns:
+            path (str): URI path to Django Admin page for object.
+
+        """
+        content_type = ContentType.objects.get_for_model(self.__class__)
+        return reverse(
+            "admin:%s_%s_change" % (content_type.app_label, content_type.model), args=(self.id,)
+        )
+
+    @classmethod
+    def web_get_create_url(cls):
+        """
+        Returns the URI path for a View that allows users to create new
+        instances of this object.
+
+        ex. Chargen = '/characters/create/'
+
+        For this to work, the developer must have defined a named view somewhere
+        in urls.py that follows the format 'modelname-action', so in this case
+        a named view of 'channel-create' would be referenced by this method.
+
+        ex.
+        url(r'channels/create/', ChannelCreateView.as_view(), name='channel-create')
+
+        If no View has been created and defined in urls.py, returns an
+        HTML anchor.
+
+        This method is naive and simply returns a path. Securing access to
+        the actual view and limiting who can create new objects is the
+        developer's responsibility.
+
+        Returns:
+            path (str): URI path to object creation page, if defined.
+
+        """
+        try:
+            return reverse("%s-create" % slugify(cls._meta.verbose_name))
+        except:
+            return "#"
+
+    def web_get_detail_url(self):
+        """
+        Returns the URI path for a View that allows users to view details for
+        this object.
+
+        ex. Oscar (Character) = '/characters/oscar/1/'
+
+        For this to work, the developer must have defined a named view somewhere
+        in urls.py that follows the format 'modelname-action', so in this case
+        a named view of 'channel-detail' would be referenced by this method.
+
+        ex.
+        url(r'channels/(?P<slug>[\w\d\-]+)/$',
+            ChannelDetailView.as_view(), name='channel-detail')
+
+        If no View has been created and defined in urls.py, returns an
+        HTML anchor.
+
+        This method is naive and simply returns a path. Securing access to
+        the actual view and limiting who can view this object is the developer's
+        responsibility.
+
+        Returns:
+            path (str): URI path to object detail page, if defined.
+
+        """
+        try:
+            return reverse(
+                "%s-detail" % slugify(self._meta.verbose_name),
+                kwargs={"slug": slugify(self.db_key)},
+            )
+        except:
+            return "#"
+
+    def web_get_update_url(self):
+        """
+        Returns the URI path for a View that allows users to update this
+        object.
+
+        ex. Oscar (Character) = '/characters/oscar/1/change/'
+
+        For this to work, the developer must have defined a named view somewhere
+        in urls.py that follows the format 'modelname-action', so in this case
+        a named view of 'channel-update' would be referenced by this method.
+
+        ex.
+        url(r'channels/(?P<slug>[\w\d\-]+)/(?P<pk>[0-9]+)/change/$',
+            ChannelUpdateView.as_view(), name='channel-update')
+
+        If no View has been created and defined in urls.py, returns an
+        HTML anchor.
+
+        This method is naive and simply returns a path. Securing access to
+        the actual view and limiting who can modify objects is the developer's
+        responsibility.
+
+        Returns:
+            path (str): URI path to object update page, if defined.
+
+        """
+        try:
+            return reverse(
+                "%s-update" % slugify(self._meta.verbose_name),
+                kwargs={"slug": slugify(self.db_key)},
+            )
+        except:
+            return "#"
+
+    def web_get_delete_url(self):
+        """
+        Returns the URI path for a View that allows users to delete this object.
+
+        ex. Oscar (Character) = '/characters/oscar/1/delete/'
+
+        For this to work, the developer must have defined a named view somewhere
+        in urls.py that follows the format 'modelname-action', so in this case
+        a named view of 'channel-delete' would be referenced by this method.
+
+        ex.
+        url(r'channels/(?P<slug>[\w\d\-]+)/(?P<pk>[0-9]+)/delete/$',
+            ChannelDeleteView.as_view(), name='channel-delete')
+
+        If no View has been created and defined in urls.py, returns an
+        HTML anchor.
+
+        This method is naive and simply returns a path. Securing access to
+        the actual view and limiting who can delete this object is the developer's
+        responsibility.
+
+        Returns:
+            path (str): URI path to object deletion page, if defined.
+
+        """
+        try:
+            return reverse(
+                "%s-delete" % slugify(self._meta.verbose_name),
+                kwargs={"slug": slugify(self.db_key)},
+            )
+        except:
+            return "#"
+
+    # Used by Django Sites/Admin
+    get_absolute_url = web_get_detail_url

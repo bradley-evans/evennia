@@ -9,8 +9,8 @@ Objects:
 
 TutorialObject
 
-Readable
-Climbable
+TutorialReadable
+TutorialClimbable
 Obelisk
 LightSource
 CrumblingWall
@@ -18,13 +18,12 @@ Weapon
 WeaponRack
 
 """
-from future.utils import listvalues
 
 import random
 
 from evennia import DefaultObject, DefaultExit, Command, CmdSet
 from evennia.utils import search, delay
-from evennia.utils.spawner import spawn
+from evennia.prototypes.spawner import spawn
 
 # -------------------------------------------------------------
 #
@@ -50,7 +49,7 @@ class TutorialObject(DefaultObject):
 
     def at_object_creation(self):
         """Called when the object is first created."""
-        super(TutorialObject, self).at_object_creation()
+        super().at_object_creation()
         self.db.tutorial_info = "No tutorial info is available for this object."
 
     def reset(self):
@@ -67,6 +66,7 @@ class TutorialObject(DefaultObject):
 #
 # Read command
 #
+
 
 class CmdRead(Command):
     """
@@ -113,7 +113,7 @@ class CmdSetReadable(CmdSet):
         self.add(CmdRead())
 
 
-class Readable(TutorialObject):
+class TutorialReadable(TutorialObject):
     """
     This simple object defines some attributes and
     """
@@ -123,8 +123,10 @@ class Readable(TutorialObject):
         Called when object is created. We make sure to set the needed
         Attribute and add the readable cmdset.
         """
-        super(Readable, self).at_object_creation()
-        self.db.tutorial_info = "This is an object with a 'read' command defined in a command set on itself."
+        super().at_object_creation()
+        self.db.tutorial_info = (
+            "This is an object with a 'read' command defined in a command set on itself."
+        )
         self.db.readable_text = "There is no text written on %s." % self.key
         # define a command on the object.
         self.cmdset.add_default(CmdSetReadable, permanent=True)
@@ -142,6 +144,7 @@ class Readable(TutorialObject):
 #
 # -------------------------------------------------------------
 
+
 class CmdClimb(Command):
     """
     Climb an object
@@ -151,6 +154,7 @@ class CmdClimb(Command):
 
     This allows you to climb.
     """
+
     key = "climb"
     locks = "cmd:all()"
     help_category = "TutorialWorld"
@@ -183,7 +187,7 @@ class CmdSetClimbable(CmdSet):
         self.add(CmdClimb())
 
 
-class Climbable(TutorialObject):
+class TutorialClimbable(TutorialObject):
     """
     A climbable object. All that is special about it is that it has
     the "climb" command available on it.
@@ -206,6 +210,7 @@ class Climbable(TutorialObject):
 #
 # -------------------------------------------------------------
 
+
 class Obelisk(TutorialObject):
     """
     This object changes its description randomly, and which is shown
@@ -221,8 +226,10 @@ class Obelisk(TutorialObject):
 
     def at_object_creation(self):
         """Called when object is created."""
-        super(Obelisk, self).at_object_creation()
-        self.db.tutorial_info = "This object changes its desc randomly, and makes sure to remember which one you saw."
+        super().at_object_creation()
+        self.db.tutorial_info = (
+            "This object changes its desc randomly, and makes sure to remember which one you saw."
+        )
         self.db.puzzle_descs = ["You see a normal stone slab"]
         # make sure this can never be picked up
         self.locks.add("get:false()")
@@ -236,8 +243,10 @@ class Obelisk(TutorialObject):
         descs = self.db.puzzle_descs
         clueindex = random.randint(0, len(descs) - 1)
         # set this description, with the random extra
-        string = "The surface of the obelisk seem to waver, shift and writhe under your gaze, with " \
-                 "different scenes and structures appearing whenever you look at it. "
+        string = (
+            "The surface of the obelisk seem to waver, shift and writhe under your gaze, with "
+            "different scenes and structures appearing whenever you look at it. "
+        )
         self.db.desc = string + descs[clueindex]
         # remember that this was the clue we got. The Puzzle room will
         # look for this later to determine if you should be teleported
@@ -245,7 +254,7 @@ class Obelisk(TutorialObject):
         caller.db.puzzle_clue = clueindex
         # call the parent function as normal (this will use
         # the new desc Attribute we just set)
-        return super(Obelisk, self).return_appearance(caller)
+        return super().return_appearance(caller)
 
 
 # -------------------------------------------------------------
@@ -265,10 +274,12 @@ class Obelisk(TutorialObject):
 #
 # -------------------------------------------------------------
 
+
 class CmdLight(Command):
     """
     Creates light where there was none. Something to burn.
     """
+
     key = "on"
     aliases = ["light", "burn"]
     # only allow this command if command.obj is carried by caller.
@@ -283,13 +294,16 @@ class CmdLight(Command):
 
         if self.obj.light():
             self.caller.msg("You light %s." % self.obj.key)
-            self.caller.location.msg_contents("%s lights %s!" % (self.caller, self.obj.key), exclude=[self.caller])
+            self.caller.location.msg_contents(
+                "%s lights %s!" % (self.caller, self.obj.key), exclude=[self.caller]
+            )
         else:
             self.caller.msg("%s is already burning." % self.obj.key)
 
 
 class CmdSetLight(CmdSet):
     """CmdSet for the lightsource commands"""
+
     key = "lightsource_cmdset"
     # this is higher than the dark cmdset - important!
     priority = 3
@@ -319,8 +333,10 @@ class LightSource(TutorialObject):
 
     def at_object_creation(self):
         """Called when object is first created."""
-        super(LightSource, self).at_object_creation()
-        self.db.tutorial_info = "This object can be lit to create light. It has a timeout for how long it burns."
+        super().at_object_creation()
+        self.db.tutorial_info = (
+            "This object can be lit to create light. It has a timeout for how long it burns."
+        )
         self.db.is_giving_light = False
         self.db.burntime = 60 * 3  # 3 minutes
         # this is the default desc, it can of course be customized
@@ -337,8 +353,9 @@ class LightSource(TutorialObject):
         # delete ourselves from the database
         self.db.is_giving_light = False
         try:
-            self.location.location.msg_contents("%s's %s flickers and dies." %
-                                                (self.location, self.key), exclude=self.location)
+            self.location.location.msg_contents(
+                "%s's %s flickers and dies." % (self.location, self.key), exclude=self.location
+            )
             self.location.msg("Your %s flickers and dies." % self.key)
             self.location.location.check_light_state()
         except AttributeError:
@@ -404,6 +421,7 @@ class LightSource(TutorialObject):
 # Attribute root_pos (a dictionary) to describe the current
 # position of the roots.
 
+
 class CmdShiftRoot(Command):
     """
     Shifts roots around.
@@ -415,6 +433,7 @@ class CmdShiftRoot(Command):
       shift green root up/down
 
     """
+
     key = "shift"
     aliases = ["shiftroot", "push", "pull", "move"]
     # we only allow to use this command while the
@@ -447,7 +466,9 @@ class CmdShiftRoot(Command):
         # we accept arguments on the form <color> <direction>
 
         if not len(self.arglist) > 1:
-            self.caller.msg("You must define which colour of root you want to move, and in which direction.")
+            self.caller.msg(
+                "You must define which colour of root you want to move, and in which direction."
+            )
             return
 
         color = self.arglist[0].lower()
@@ -467,30 +488,42 @@ class CmdShiftRoot(Command):
                 self.caller.msg("You shift the reddish root to the left.")
                 if root_pos[color] != 0 and root_pos[color] == root_pos["blue"]:
                     root_pos["blue"] += 1
-                    self.caller.msg("The root with blue flowers gets in the way and is pushed to the right.")
+                    self.caller.msg(
+                        "The root with blue flowers gets in the way and is pushed to the right."
+                    )
             elif direction == "right":
                 root_pos[color] = min(1, root_pos[color] + 1)
                 self.caller.msg("You shove the reddish root to the right.")
                 if root_pos[color] != 0 and root_pos[color] == root_pos["blue"]:
                     root_pos["blue"] -= 1
-                    self.caller.msg("The root with blue flowers gets in the way and is pushed to the left.")
+                    self.caller.msg(
+                        "The root with blue flowers gets in the way and is pushed to the left."
+                    )
             else:
-                self.caller.msg("You cannot move the root in that direction.")
+                self.caller.msg(
+                    "The root hangs straight down - you can only move it left or right."
+                )
         elif color == "blue":
             if direction == "left":
                 root_pos[color] = max(-1, root_pos[color] - 1)
                 self.caller.msg("You shift the root with small blue flowers to the left.")
                 if root_pos[color] != 0 and root_pos[color] == root_pos["red"]:
                     root_pos["red"] += 1
-                    self.caller.msg("The reddish root is to big to fit as well, so that one falls away to the left.")
+                    self.caller.msg(
+                        "The reddish root is too big to fit as well, so that one falls away to the left."
+                    )
             elif direction == "right":
                 root_pos[color] = min(1, root_pos[color] + 1)
                 self.caller.msg("You shove the root adorned with small blue flowers to the right.")
                 if root_pos[color] != 0 and root_pos[color] == root_pos["red"]:
                     root_pos["red"] -= 1
-                    self.caller.msg("The thick reddish root gets in the way and is pushed back to the left.")
+                    self.caller.msg(
+                        "The thick reddish root gets in the way and is pushed back to the left."
+                    )
             else:
-                self.caller.msg("You cannot move the root in that direction.")
+                self.caller.msg(
+                    "The root hangs straight down - you can only move it left or right."
+                )
 
         # now the horizontal roots (yellow/green). They can be moved up/down
         elif color == "yellow":
@@ -507,7 +540,7 @@ class CmdShiftRoot(Command):
                     root_pos["green"] -= 1
                     self.caller.msg("The weedy green root is shifted upwards to make room.")
             else:
-                self.caller.msg("You cannot move the root in that direction.")
+                self.caller.msg("The root hangs across the wall - you can only move it up or down.")
         elif color == "green":
             if direction == "up":
                 root_pos[color] = max(-1, root_pos[color] - 1)
@@ -520,15 +553,17 @@ class CmdShiftRoot(Command):
                 self.caller.msg("You shove the weedy green root downwards.")
                 if root_pos[color] != 0 and root_pos[color] == root_pos["yellow"]:
                     root_pos["yellow"] -= 1
-                    self.caller.msg("The root with yellow flowers gets in the way and is pushed upwards.")
+                    self.caller.msg(
+                        "The root with yellow flowers gets in the way and is pushed upwards."
+                    )
             else:
-                self.caller.msg("You cannot move the root in that direction.")
+                self.caller.msg("The root hangs across the wall - you can only move it up or down.")
 
         # we have moved the root. Store new position
         self.obj.db.root_pos = root_pos
 
         # Check victory condition
-        if listvalues(root_pos).count(0) == 0:  # no roots in middle position
+        if list(root_pos.values()).count(0) == 0:  # no roots in middle position
             # This will affect the cmd: lock of CmdPressButton
             self.obj.db.button_exposed = True
             self.caller.msg("Holding aside the root you think you notice something behind it ...")
@@ -538,6 +573,7 @@ class CmdPressButton(Command):
     """
     Presses a button.
     """
+
     key = "press"
     aliases = ["press button", "button", "push button"]
     # only accessible if the button was found and there is light. This checks
@@ -552,23 +588,31 @@ class CmdPressButton(Command):
 
         if self.caller.db.crumbling_wall_found_exit:
             # we already pushed the button
-            self.caller.msg("The button folded away when the secret passage opened. You cannot push it again.")
+            self.caller.msg(
+                "The button folded away when the secret passage opened. You cannot push it again."
+            )
             return
 
         # pushing the button
-        string = "You move your fingers over the suspicious depression, then gives it a " \
-                 "decisive push. First nothing happens, then there is a rumble and a hidden " \
-                 "|wpassage|n opens, dust and pebbles rumbling as part of the wall moves aside."
+        string = (
+            "You move your fingers over the suspicious depression, then gives it a "
+            "decisive push. First nothing happens, then there is a rumble and a hidden "
+            "|wpassage|n opens, dust and pebbles rumbling as part of the wall moves aside."
+        )
         self.caller.msg(string)
-        string = "%s moves their fingers over the suspicious depression, then gives it a " \
-                 "decisive push. First nothing happens, then there is a rumble and a hidden " \
-                 "|wpassage|n opens, dust and pebbles rumbling as part of the wall moves aside."
+        string = (
+            "%s moves their fingers over the suspicious depression, then gives it a "
+            "decisive push. First nothing happens, then there is a rumble and a hidden "
+            "|wpassage|n opens, dust and pebbles rumbling as part of the wall moves aside."
+        )
         self.caller.location.msg_contents(string % self.caller.key, exclude=self.caller)
-        self.obj.open_wall()
+        if not self.obj.open_wall():
+            self.caller.msg("The exit leads nowhere, there's just more stone behind it ...")
 
 
 class CmdSetCrumblingWall(CmdSet):
     """Group the commands for crumblingWall"""
+
     key = "crumblingwall_cmdset"
     priority = 2
 
@@ -601,10 +645,9 @@ class CrumblingWall(TutorialObject, DefaultExit):
 
     def at_object_creation(self):
         """called when the object is first created."""
-        super(CrumblingWall, self).at_object_creation()
+        super().at_object_creation()
 
-        self.aliases.add(["secret passage", "passage",
-                          "crack", "opening", "secret door"])
+        self.aliases.add(["secret passage", "passage", "crack", "opening", "secret door"])
 
         # starting root positions. H1/H2 are the horizontally hanging roots,
         # V1/V2 the vertically hanging ones. Each can have three positions:
@@ -638,7 +681,7 @@ class CrumblingWall(TutorialObject, DefaultExit):
         # this will make it into a proper exit (this returns a list)
         eloc = search.search_object(self.db.destination)
         if not eloc:
-            self.caller.msg("The exit leads nowhere, there's just more stone behind it ...")
+            return False
         else:
             self.destination = eloc[0]
         self.db.exit_open = True
@@ -648,16 +691,22 @@ class CrumblingWall(TutorialObject, DefaultExit):
 
     def _translate_position(self, root, ipos):
         """Translates the position into words"""
-        rootnames = {"red": "The |rreddish|n vertical-hanging root ",
-                     "blue": "The thick vertical root with |bblue|n flowers ",
-                     "yellow": "The thin horizontal-hanging root with |yyellow|n flowers ",
-                     "green": "The weedy |ggreen|n horizontal root "}
-        vpos = {-1: "hangs far to the |wleft|n on the wall.",
-                0: "hangs straight down the |wmiddle|n of the wall.",
-                1: "hangs far to the |wright|n of the wall."}
-        hpos = {-1: "covers the |wupper|n part of the wall.",
-                0: "passes right over the |wmiddle|n of the wall.",
-                1: "nearly touches the floor, near the |wbottom|n of the wall."}
+        rootnames = {
+            "red": "The |rreddish|n vertical-hanging root ",
+            "blue": "The thick vertical root with |bblue|n flowers ",
+            "yellow": "The thin horizontal-hanging root with |yyellow|n flowers ",
+            "green": "The weedy |ggreen|n horizontal root ",
+        }
+        vpos = {
+            -1: "hangs far to the |wleft|n on the wall.",
+            0: "hangs straight down the |wmiddle|n of the wall.",
+            1: "hangs far to the |wright|n of the wall.",
+        }
+        hpos = {
+            -1: "covers the |wupper|n part of the wall.",
+            0: "passes right over the |wmiddle|n of the wall.",
+            1: "nearly touches the floor, near the |wbottom|n of the wall.",
+        }
 
         if root in ("yellow", "green"):
             string = rootnames[root] + hpos[ipos]
@@ -672,28 +721,34 @@ class CrumblingWall(TutorialObject, DefaultExit):
         """
         if self.db.button_exposed:
             # we found the button by moving the roots
-            result = ["Having moved all the roots aside, you find that the center of the wall, "
-                      "previously hidden by the vegetation, hid a curious square depression. It was maybe once "
-                      "concealed and made to look a part of the wall, but with the crumbling of stone around it,"
-                      "it's now easily identifiable as some sort of button."]
+            result = [
+                "Having moved all the roots aside, you find that the center of the wall, "
+                "previously hidden by the vegetation, hid a curious square depression. It was maybe once "
+                "concealed and made to look a part of the wall, but with the crumbling of stone around it, "
+                "it's now easily identifiable as some sort of button."
+            ]
         elif self.db.exit_open:
             # we pressed the button; the exit is open
-            result = ["With the button pressed, a crack has opened in the root-covered wall, just wide enough "
-                      "to squeeze through. A cold draft is coming from the hole and you get the feeling the "
-                      "opening may close again soon."]
+            result = [
+                "With the button pressed, a crack has opened in the root-covered wall, just wide enough "
+                "to squeeze through. A cold draft is coming from the hole and you get the feeling the "
+                "opening may close again soon."
+            ]
         else:
             # puzzle not solved yet.
-            result = ["The wall is old and covered with roots that here and there have permeated the stone. "
-                      "The roots (or whatever they are - some of them are covered in small nondescript flowers) "
-                      "crisscross the wall, making it hard to clearly see its stony surface. Maybe you could "
-                      "try to |wshift|n or |wmove|n them.\n"]
+            result = [
+                "The wall is old and covered with roots that here and there have permeated the stone. "
+                "The roots (or whatever they are - some of them are covered in small nondescript flowers) "
+                "crisscross the wall, making it hard to clearly see its stony surface. Maybe you could "
+                "try to |wshift|n or |wmove|n them.\n"
+            ]
             # display the root positions to help with the puzzle
             for key, pos in self.db.root_pos.items():
                 result.append("\n" + self._translate_position(key, pos))
         self.db.desc = "".join(result)
 
         # call the parent to continue execution (will use the desc we just set)
-        return super(CrumblingWall, self).return_appearance(caller)
+        return super().return_appearance(caller)
 
     def at_after_traverse(self, traverser, source_location):
         """
@@ -713,7 +768,9 @@ class CrumblingWall(TutorialObject, DefaultExit):
         Called by tutorial world runner, or whenever someone successfully
         traversed the Exit.
         """
-        self.location.msg_contents("The secret door closes abruptly, roots falling back into place.")
+        self.location.msg_contents(
+            "The secret door closes abruptly, roots falling back into place."
+        )
 
         # reset the flags and remove the exit destination
         self.db.button_exposed = False
@@ -721,11 +778,13 @@ class CrumblingWall(TutorialObject, DefaultExit):
         self.destination = None
 
         # Reset the roots with some random starting positions for the roots:
-        start_pos = [{"yellow": 1, "green": 0, "red": 0, "blue": 0},
-                     {"yellow": 0, "green": 0, "red": 0, "blue": 0},
-                     {"yellow": 0, "green": 1, "red": -1, "blue": 0},
-                     {"yellow": 1, "green": 0, "red": 0, "blue": 0},
-                     {"yellow": 0, "green": 0, "red": 0, "blue": 1}]
+        start_pos = [
+            {"yellow": 1, "green": 0, "red": 0, "blue": 0},
+            {"yellow": 0, "green": 0, "red": 0, "blue": 0},
+            {"yellow": 0, "green": 1, "red": -1, "blue": 0},
+            {"yellow": 1, "green": 0, "red": 0, "blue": 0},
+            {"yellow": 0, "green": 0, "red": 0, "blue": 1},
+        ]
         self.db.root_pos = random.choice(start_pos)
 
 
@@ -744,6 +803,7 @@ class CrumblingWall(TutorialObject, DefaultExit):
 # to hit with it, and how much damage it can do.
 #
 # -------------------------------------------------------------
+
 
 class CmdAttack(Command):
     """
@@ -764,7 +824,18 @@ class CmdAttack(Command):
     # command class, using the given command alias to separate between them.
 
     key = "attack"
-    aliases = ["hit", "kill", "fight", "thrust", "pierce", "stab", "slash", "chop", "parry", "defend"]
+    aliases = [
+        "hit",
+        "kill",
+        "fight",
+        "thrust",
+        "pierce",
+        "stab",
+        "slash",
+        "chop",
+        "parry",
+        "defend",
+    ]
     locks = "cmd:all()"
     help_category = "TutorialWorld"
 
@@ -780,10 +851,14 @@ class CmdAttack(Command):
 
         # parry mode
         if cmdstring in ("parry", "defend"):
-            string = "You raise your weapon in a defensive pose, ready to block the next enemy attack."
+            string = (
+                "You raise your weapon in a defensive pose, ready to block the next enemy attack."
+            )
             self.caller.msg(string)
             self.caller.db.combat_parry_mode = True
-            self.caller.location.msg_contents("%s takes a defensive stance" % self.caller, exclude=[self.caller])
+            self.caller.location.msg_contents(
+                "%s takes a defensive stance" % self.caller, exclude=[self.caller]
+            )
             return
 
         if not self.args:
@@ -801,15 +876,19 @@ class CmdAttack(Command):
             ostring = "%s stabs at %s with %s. " % (self.caller.key, target.key, self.obj.key)
             self.caller.db.combat_parry_mode = False
         elif cmdstring in ("slash", "chop"):
-            hit = float(self.obj.db.hit)   # un modified due to slash
+            hit = float(self.obj.db.hit)  # un modified due to slash
             damage = self.obj.db.damage  # un modified due to slash
             string = "You slash with %s. " % self.obj.key
             tstring = "%s slash at you with %s. " % (self.caller.key, self.obj.key)
             ostring = "%s slash at %s with %s. " % (self.caller.key, target.key, self.obj.key)
             self.caller.db.combat_parry_mode = False
         else:
-            self.caller.msg("You fumble with your weapon, unsure of whether to stab, slash or parry ...")
-            self.caller.location.msg_contents("%s fumbles with their weapon." % self.caller, exclude=self.caller)
+            self.caller.msg(
+                "You fumble with your weapon, unsure of whether to stab, slash or parry ..."
+            )
+            self.caller.location.msg_contents(
+                "%s fumbles with their weapon." % self.caller, exclude=self.caller
+            )
             self.caller.db.combat_parry_mode = False
             return
 
@@ -821,7 +900,9 @@ class CmdAttack(Command):
         if random.random() <= hit:
             self.caller.msg(string + "|gIt's a hit!|n")
             target.msg(tstring + "|rIt's a hit!|n")
-            self.caller.location.msg_contents(ostring + "It's a hit!", exclude=[target, self.caller])
+            self.caller.location.msg_contents(
+                ostring + "It's a hit!", exclude=[target, self.caller]
+            )
 
             # call enemy hook
             if hasattr(target, "at_hit"):
@@ -862,8 +943,8 @@ class Weapon(TutorialObject):
 
     def at_object_creation(self):
         """Called at first creation of the object"""
-        super(Weapon, self).at_object_creation()
-        self.db.hit = 0.4    # hit chance
+        super().at_object_creation()
+        self.db.hit = 0.4  # hit chance
         self.db.parry = 0.8  # parry chance
         self.db.damage = 1.0
         self.db.magic = False
@@ -875,8 +956,10 @@ class Weapon(TutorialObject):
         to return to.
         """
         if self.location.has_account and self.home == self.location:
-            self.location.msg_contents("%s suddenly and magically fades into nothingness, as if it was never there ..."
-                                       % self.key)
+            self.location.msg_contents(
+                "%s suddenly and magically fades into nothingness, as if it was never there ..."
+                % self.key
+            )
             self.delete()
         else:
             self.location = self.home
@@ -903,96 +986,109 @@ WEAPON_PROTOTYPES = {
         "parry": 0.2,
         "damage": 1.0,
         "magic": False,
-        "desc": "A generic blade."},
+        "desc": "A generic blade.",
+    },
     "knife": {
-        "prototype": "weapon",
+        "prototype_parent": "weapon",
         "aliases": "sword",
         "key": "Kitchen knife",
         "desc": "A rusty kitchen knife. Better than nothing.",
-        "damage": 3},
+        "damage": 3,
+    },
     "dagger": {
-        "prototype": "knife",
+        "prototype_parent": "knife",
         "key": "Rusty dagger",
         "aliases": ["knife", "dagger"],
         "desc": "A double-edged dagger with a nicked edge and a wooden handle.",
-        "hit": 0.25},
+        "hit": 0.25,
+    },
     "sword": {
-        "prototype": "weapon",
+        "prototype_parent": "weapon",
         "key": "Rusty sword",
         "aliases": ["sword"],
         "desc": "A rusty shortsword. It has a leather-wrapped handle covered i food grease.",
         "hit": 0.3,
         "damage": 5,
-        "parry": 0.5},
+        "parry": 0.5,
+    },
     "club": {
-        "prototype": "weapon",
+        "prototype_parent": "weapon",
         "key": "Club",
         "desc": "A heavy wooden club, little more than a heavy branch.",
         "hit": 0.4,
         "damage": 6,
-        "parry": 0.2},
+        "parry": 0.2,
+    },
     "axe": {
-        "prototype": "weapon",
+        "prototype_parent": "weapon",
         "key": "Axe",
         "desc": "A woodcutter's axe with a keen edge.",
         "hit": 0.4,
         "damage": 6,
-        "parry": 0.2},
+        "parry": 0.2,
+    },
     "ornate longsword": {
-        "prototype": "sword",
+        "prototype_parent": "sword",
         "key": "Ornate longsword",
         "desc": "A fine longsword with some swirling patterns on the handle.",
         "hit": 0.5,
         "magic": True,
-        "damage": 5},
+        "damage": 5,
+    },
     "warhammer": {
-        "prototype": "club",
+        "prototype_parent": "club",
         "key": "Silver Warhammer",
         "aliases": ["hammer", "warhammer", "war"],
         "desc": "A heavy war hammer with silver ornaments. This huge weapon causes massive damage - if you can hit.",
         "hit": 0.4,
         "magic": True,
-        "damage": 8},
+        "damage": 8,
+    },
     "rune axe": {
-        "prototype": "axe",
+        "prototype_parent": "axe",
         "key": "Runeaxe",
         "aliases": ["axe"],
         "hit": 0.4,
         "magic": True,
-        "damage": 6},
+        "damage": 6,
+    },
     "thruning": {
-        "prototype": "ornate longsword",
+        "prototype_parent": "ornate longsword",
         "key": "Broadsword named Thruning",
         "desc": "This heavy bladed weapon is marked with the name 'Thruning'. It is very powerful in skilled hands.",
         "hit": 0.6,
         "parry": 0.6,
-        "damage": 7},
+        "damage": 7,
+    },
     "slayer waraxe": {
-        "prototype": "rune axe",
+        "prototype_parent": "rune axe",
         "key": "Slayer waraxe",
         "aliases": ["waraxe", "war", "slayer"],
         "desc": "A huge double-bladed axe marked with the runes for 'Slayer'."
-                " It has more runic inscriptions on its head, which you cannot decipher.",
+        " It has more runic inscriptions on its head, which you cannot decipher.",
         "hit": 0.7,
-        "damage": 8},
+        "damage": 8,
+    },
     "ghostblade": {
-        "prototype": "ornate longsword",
+        "prototype_parent": "ornate longsword",
         "key": "The Ghostblade",
         "aliases": ["blade", "ghost"],
         "desc": "This massive sword is large as you are tall, yet seems to weigh almost nothing."
-                " It's almost like it's not really there.",
+        " It's almost like it's not really there.",
         "hit": 0.9,
         "parry": 0.8,
-        "damage": 10},
+        "damage": 10,
+    },
     "hawkblade": {
-        "prototype": "ghostblade",
+        "prototype_parent": "ghostblade",
         "key": "The Hawkblade",
         "aliases": ["hawk", "blade"],
         "desc": "The weapon of a long-dead heroine and a more civilized age,"
-                " the hawk-shaped hilt of this blade almost has a life of its own.",
+        " the hawk-shaped hilt of this blade almost has a life of its own.",
         "hit": 0.85,
         "parry": 0.7,
-        "damage": 11}
+        "damage": 11,
+    },
 }
 
 
@@ -1003,6 +1099,7 @@ class CmdGetWeapon(Command):
 
     This will try to obtain a weapon from the container.
     """
+
     key = "get weapon"
     aliases = "get weapon"
     locks = "cmd:all()"
@@ -1020,6 +1117,7 @@ class CmdSetWeaponRack(CmdSet):
     """
     The cmdset for the rack.
     """
+
     key = "weaponrack_cmdset"
 
     def at_cmdset_creation(self):
@@ -1054,8 +1152,7 @@ class WeaponRack(TutorialObject):
         # dictionary above.
         self.db.get_weapon_msg = "You find |c%s|n."
         self.db.no_more_weapons_msg = "you find nothing else of use."
-        self.db.available_weapons = ["knife", "dagger",
-                                     "sword", "club"]
+        self.db.available_weapons = ["knife", "dagger", "sword", "club"]
 
     def produce_weapon(self, caller):
         """

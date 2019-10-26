@@ -133,13 +133,15 @@ def example1_build_mountains(x, y, **kwargs):
     room = create_object(rooms.Room, key="mountains" + str(x) + str(y))
 
     # Generate a description by randomly selecting an entry from a list.
-    room_desc = ["Mountains as far as the eye can see",
-                 "Your path is surrounded by sheer cliffs",
-                 "Haven't you seen that rock before?"]
+    room_desc = [
+        "Mountains as far as the eye can see",
+        "Your path is surrounded by sheer cliffs",
+        "Haven't you seen that rock before?",
+    ]
     room.db.desc = random.choice(room_desc)
 
     # Create a random number of objects to populate the room.
-    for i in xrange(randint(0, 3)):
+    for i in range(randint(0, 3)):
         rock = create_object(key="Rock", location=room)
         rock.db.desc = "An ordinary rock."
 
@@ -157,15 +159,17 @@ def example1_build_temple(x, y, **kwargs):
     room = create_object(rooms.Room, key="temple" + str(x) + str(y))
 
     # Set the description.
-    room.db.desc = ("In what, from the outside, appeared to be a grand and "
-                    "ancient temple you've somehow found yourself in the the "
-                    "Evennia Inn! It consists of one large room filled with "
-                    "tables. The bardisk extends along the east wall, where "
-                    "multiple barrels and bottles line the shelves. The "
-                    "barkeep seems busy handing out ale and chatting with "
-                    "the patrons, which are a rowdy and cheerful lot, "
-                    "keeping the sound level only just below thunderous. "
-                    "This is a rare spot of mirth on this dread moor.")
+    room.db.desc = (
+        "In what, from the outside, appeared to be a grand and "
+        "ancient temple you've somehow found yourself in the the "
+        "Evennia Inn! It consists of one large room filled with "
+        "tables. The bardisk extends along the east wall, where "
+        "multiple barrels and bottles line the shelves. The "
+        "barkeep seems busy handing out ale and chatting with "
+        "the patrons, which are a rowdy and cheerful lot, "
+        "keeping the sound level only just below thunderous. "
+        "This is a rare spot of mirth on this dread moor."
+    )
 
     # Send a message to the account
     kwargs["caller"].msg(room.key + " " + room.dbref)
@@ -175,9 +179,11 @@ def example1_build_temple(x, y, **kwargs):
 
 
 # Include your trigger characters and build functions in a legend dict.
-EXAMPLE1_LEGEND = {("♣", "♠"): example1_build_forest,
-                   ("∩", "n"): example1_build_mountains,
-                   ("▲"): example1_build_temple}
+EXAMPLE1_LEGEND = {
+    ("♣", "♠"): example1_build_forest,
+    ("∩", "n"): example1_build_mountains,
+    ("▲"): example1_build_temple,
+}
 
 # ---------- EXAMPLE 2 ---------- #
 # @mapbuilder/two evennia.contrib.mapbuilder.EXAMPLE2_MAP EXAMPLE2_LEGEND
@@ -185,11 +191,11 @@ EXAMPLE1_LEGEND = {("♣", "♠"): example1_build_forest,
 # -*- coding: utf-8 -*-
 
 # Add the necessary imports for your instructions here.
-#from evennia import create_object
-#from typeclasses import rooms, exits
-#from evennia.utils import utils
-#from random import randint
-#import random
+# from evennia import create_object
+# from typeclasses import rooms, exits
+# from evennia.utils import utils
+# from random import randint
+# import random
 
 # This is the same layout as Example 1 but included are characters for exits.
 # We can use these characters to determine which rooms should be connected.
@@ -230,16 +236,15 @@ def example2_build_verticle_exit(x, y, **kwargs):
     south_room = kwargs["room_dict"][(x, y + 1)]
 
     # create exits in the rooms
-    create_object(exits.Exit, key="south",
-                  aliases=["s"], location=north_room,
-                  destination=south_room)
+    create_object(
+        exits.Exit, key="south", aliases=["s"], location=north_room, destination=south_room
+    )
 
-    create_object(exits.Exit, key="north",
-                  aliases=["n"], location=south_room,
-                  destination=north_room)
+    create_object(
+        exits.Exit, key="north", aliases=["n"], location=south_room, destination=north_room
+    )
 
-    kwargs["caller"].msg("Connected: " + north_room.key +
-                         " & " + south_room.key)
+    kwargs["caller"].msg("Connected: " + north_room.key + " & " + south_room.key)
 
 
 def example2_build_horizontal_exit(x, y, **kwargs):
@@ -251,22 +256,19 @@ def example2_build_horizontal_exit(x, y, **kwargs):
     west_room = kwargs["room_dict"][(x - 1, y)]
     east_room = kwargs["room_dict"][(x + 1, y)]
 
-    create_object(exits.Exit, key="east",
-                  aliases=["e"], location=west_room,
-                  destination=east_room)
+    create_object(exits.Exit, key="east", aliases=["e"], location=west_room, destination=east_room)
 
-    create_object(exits.Exit, key="west",
-                  aliases=["w"], location=east_room,
-                  destination=west_room)
+    create_object(exits.Exit, key="west", aliases=["w"], location=east_room, destination=west_room)
 
-    kwargs["caller"].msg("Connected: " + west_room.key +
-                         " & " + east_room.key)
+    kwargs["caller"].msg("Connected: " + west_room.key + " & " + east_room.key)
 
 
 # Include your trigger characters and build functions in a legend dict.
-EXAMPLE2_LEGEND = {("♣", "♠"): example2_build_forest,
-                   ("|"): example2_build_verticle_exit,
-                   ("-"): example2_build_horizontal_exit}
+EXAMPLE2_LEGEND = {
+    ("♣", "♠"): example2_build_forest,
+    ("|"): example2_build_verticle_exit,
+    ("-"): example2_build_horizontal_exit,
+}
 
 # ---------- END OF EXAMPLES ---------- #
 
@@ -276,7 +278,7 @@ COMMAND_DEFAULT_CLASS = utils.class_from_module(settings.COMMAND_DEFAULT_CLASS)
 # Helper function for readability.
 def _map_to_list(game_map):
     """
-    Splits multi line map string into list of rows, treats for UTF-8 encoding.
+    Splits multi line map string into list of rows.
 
     Args:
         game_map (str): An ASCII map
@@ -285,9 +287,7 @@ def _map_to_list(game_map):
         list (list): The map split into rows
 
     """
-    list_map = game_map.split('\n')
-    return [character.decode('UTF-8') if isinstance(character, basestring)
-            else character for character in list_map]
+    return game_map.split("\n")
 
 
 def build_map(caller, game_map, legend, iterations=1, build_exits=True):
@@ -321,54 +321,71 @@ def build_map(caller, game_map, legend, iterations=1, build_exits=True):
     room_dict = {}
 
     caller.msg("Creating Landmass...")
-    for iteration in xrange(iterations):
-        for y in xrange(len(game_map)):
-            for x in xrange(len(game_map[y])):
+    for iteration in range(iterations):
+        for y in range(len(game_map)):
+            for x in range(len(game_map[y])):
                 for key in legend:
-                    # obs - we must use == for unicode
-                    if utils.to_unicode(game_map[y][x]) == utils.to_unicode(key):
-                        room = legend[key](x, y, iteration=iteration,
-                                           room_dict=room_dict,
-                                           caller=caller)
+                    # obs - we must use == for strings
+                    if game_map[y][x] == key:
+                        room = legend[key](
+                            x, y, iteration=iteration, room_dict=room_dict, caller=caller
+                        )
                         if iteration == 0:
                             room_dict[(x, y)] = room
 
     if build_exits:
         # Creating exits. Assumes single room object in dict entry
         caller.msg("Connecting Areas...")
-        for loc_key, location in room_dict.iteritems():
+        for loc_key, location in room_dict.items():
             x = loc_key[0]
             y = loc_key[1]
 
             # north
             if (x, y - 1) in room_dict:
                 if room_dict[(x, y - 1)]:
-                    create_object(exits.Exit, key="north",
-                                  aliases=["n"], location=location,
-                                  destination=room_dict[(x, y - 1)])
+                    create_object(
+                        exits.Exit,
+                        key="north",
+                        aliases=["n"],
+                        location=location,
+                        destination=room_dict[(x, y - 1)],
+                    )
 
             # east
             if (x + 1, y) in room_dict:
                 if room_dict[(x + 1, y)]:
-                    create_object(exits.Exit, key="east",
-                                  aliases=["e"], location=location,
-                                  destination=room_dict[(x + 1, y)])
+                    create_object(
+                        exits.Exit,
+                        key="east",
+                        aliases=["e"],
+                        location=location,
+                        destination=room_dict[(x + 1, y)],
+                    )
 
             # south
             if (x, y + 1) in room_dict:
                 if room_dict[(x, y + 1)]:
-                    create_object(exits.Exit, key="south",
-                                  aliases=["s"], location=location,
-                                  destination=room_dict[(x, y + 1)])
+                    create_object(
+                        exits.Exit,
+                        key="south",
+                        aliases=["s"],
+                        location=location,
+                        destination=room_dict[(x, y + 1)],
+                    )
 
             # west
             if (x - 1, y) in room_dict:
                 if room_dict[(x - 1, y)]:
-                    create_object(exits.Exit, key="west",
-                                  aliases=["w"], location=location,
-                                  destination=room_dict[(x - 1, y)])
+                    create_object(
+                        exits.Exit,
+                        key="west",
+                        aliases=["w"],
+                        location=location,
+                        destination=room_dict[(x - 1, y)],
+                    )
 
     caller.msg("Map Created.")
+
 
 # access command
 
@@ -401,6 +418,7 @@ class CmdMapBuilder(COMMAND_DEFAULT_CLASS):
     automatically generated but is turned off by switches which also determines
     how many times the map is iterated over.
     """
+
     key = "@mapbuilder"
     aliases = ["@buildmap"]
     locks = "cmd:superuser()"
@@ -414,8 +432,7 @@ class CmdMapBuilder(COMMAND_DEFAULT_CLASS):
 
         # Check if arguments passed.
         if not self.args or (len(args) != 2):
-            caller.msg("Usage: @mapbuilder <path.to.module.VARNAME> "
-                       "<path.to.module.MAP_LEGEND>")
+            caller.msg("Usage: @mapbuilder <path.to.module.VARNAME> " "<path.to.module.MAP_LEGEND>")
             return
 
         # Set up base variables.
@@ -426,17 +443,18 @@ class CmdMapBuilder(COMMAND_DEFAULT_CLASS):
 
         # Breaks down path_to_map into [PATH, VARIABLE]
         path_to_map = args[0]
-        path_to_map = path_to_map.rsplit('.', 1)
+        path_to_map = path_to_map.rsplit(".", 1)
 
         try:
             # Retrieves map variable from module or raises error.
-            game_map = utils.variable_from_module(path_to_map[0],
-                                                  path_to_map[1])
+            game_map = utils.variable_from_module(path_to_map[0], path_to_map[1])
             if not game_map:
-                raise ValueError("Command Aborted!\n"
-                                 "Path to map variable failed.\n"
-                                 "Usage: @mapbuilder <path.to.module."
-                                 "VARNAME> <path.to.module.MAP_LEGEND>")
+                raise ValueError(
+                    "Command Aborted!\n"
+                    "Path to map variable failed.\n"
+                    "Usage: @mapbuilder <path.to.module."
+                    "VARNAME> <path.to.module.MAP_LEGEND>"
+                )
 
         except Exception as exc:
             # Or relays error message if fails.
@@ -447,7 +465,7 @@ class CmdMapBuilder(COMMAND_DEFAULT_CLASS):
 
         # Breaks down path_to_legend into [PATH, VARIABLE]
         path_to_legend = args[1]
-        path_to_legend = path_to_legend.rsplit('.', 1)
+        path_to_legend = path_to_legend.rsplit(".", 1)
 
         # If no path given default to path_to_map's path
         if len(path_to_legend) == 1:
@@ -455,13 +473,14 @@ class CmdMapBuilder(COMMAND_DEFAULT_CLASS):
 
         try:
             # Retrieves legend variable from module or raises error if fails.
-            legend = utils.variable_from_module(path_to_legend[0],
-                                                path_to_legend[1])
+            legend = utils.variable_from_module(path_to_legend[0], path_to_legend[1])
             if not legend:
-                raise ValueError("Command Aborted!\n"
-                                 "Path to legend variable failed.\n"
-                                 "Usage: @mapbuilder <path.to.module."
-                                 "VARNAME> <path.to.module.MAP_LEGEND>")
+                raise ValueError(
+                    "Command Aborted!\n"
+                    "Path to legend variable failed.\n"
+                    "Usage: @mapbuilder <path.to.module."
+                    "VARNAME> <path.to.module.MAP_LEGEND>"
+                )
 
         except Exception as exc:
             # Or relays error message if fails.

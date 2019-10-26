@@ -8,24 +8,22 @@ Config values should usually be set through the
 manager's conf() method.
 
 """
-from builtins import object
-
-try:
-    import cPickle as pickle
-except ImportError:
-    import pickle
+import pickle
 
 from django.db import models
 from evennia.utils.idmapper.models import WeakSharedMemoryModel
 from evennia.utils import logger, utils
+from evennia.utils.dbserialize import to_pickle, from_pickle
 from evennia.server.manager import ServerConfigManager
+from evennia.utils import picklefield
 
 
-#------------------------------------------------------------
+# ------------------------------------------------------------
 #
 # ServerConfig
 #
-#------------------------------------------------------------
+# ------------------------------------------------------------
+
 
 class ServerConfig(WeakSharedMemoryModel):
     """
@@ -48,7 +46,16 @@ class ServerConfig(WeakSharedMemoryModel):
     # main name of the database entry
     db_key = models.CharField(max_length=64, unique=True)
     # config value
-    db_value = models.TextField(blank=True)
+    # db_value = models.BinaryField(blank=True)
+
+    db_value = picklefield.PickledObjectField(
+        "value",
+        null=True,
+        help_text="The data returned when the config value is accessed. Must be "
+        "written as a Python literal if editing through the admin "
+        "interface. Attribute values which are not Python literals "
+        "cannot be edited through the admin interface.",
+    )
 
     objects = ServerConfigManager()
     _is_deleted = False
@@ -62,43 +69,45 @@ class ServerConfig(WeakSharedMemoryModel):
     # is the object in question).
 
     # key property (wraps db_key)
-    #@property
+    # @property
     def __key_get(self):
         "Getter. Allows for value = self.key"
         return self.db_key
 
-    #@key.setter
+    # @key.setter
     def __key_set(self, value):
         "Setter. Allows for self.key = value"
         self.db_key = value
         self.save()
 
-    #@key.deleter
+    # @key.deleter
     def __key_del(self):
         "Deleter. Allows for del self.key. Deletes entry."
         self.delete()
+
     key = property(__key_get, __key_set, __key_del)
 
     # value property (wraps db_value)
-    #@property
+    # @property
     def __value_get(self):
         "Getter. Allows for value = self.value"
-        return pickle.loads(str(self.db_value))
+        return from_pickle(self.db_value, db_obj=self)
 
-    #@value.setter
+    # @value.setter
     def __value_set(self, value):
         "Setter. Allows for self.value = value"
-        if utils.has_parent('django.db.models.base.Model', value):
+        if utils.has_parent("django.db.models.base.Model", value):
             # we have to protect against storing db objects.
             logger.log_err("ServerConfig cannot store db objects! (%s)" % value)
             return
-        self.db_value = pickle.dumps(value)
+        self.db_value = to_pickle(value)
         self.save()
 
-    #@value.deleter
+    # @value.deleter
     def __value_del(self):
         "Deleter. Allows for del self.value. Deletes entry."
         self.delete()
+
     value = property(__value_get, __value_set, __value_del)
 
     class Meta(object):
@@ -110,8 +119,8 @@ class ServerConfig(WeakSharedMemoryModel):
     # ServerConfig other methods
     #
 
-    def __unicode__(self):
-        return "%s : %s" % (self.key, self.value)
+    def __repr__(self):
+        return "<{} {}>".format(self.__class__.__name__, self.key, self.value)
 
     def store(self, key, value):
         """

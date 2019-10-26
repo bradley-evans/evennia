@@ -12,11 +12,6 @@ has markers in it to denounce fields to fill. The markers map the
 absolute size of the field and will be filled with an `evtable.EvCell`
 object when displaying the form.
 
-Note, when printing examples with ANSI color, you need to wrap
-the output in `unicode()`, such as `print unicode(form)`. This is
-due to a bug in the Python parser and the `print` statement.
-
-
 Example of input file `testform.py`:
 
 ```python
@@ -91,8 +86,7 @@ Use as follows:
     form.map(tables={"A": tableA,
                      "B": tableB})
 
-    # unicode is required since the example contains non-ascii characters
-    print unicode(form)
+    print(form)
 ```
 
 This produces the following result:
@@ -134,13 +128,11 @@ into (when including its borders and at least one line of text), the
 form will raise an error.
 
 """
-from __future__ import print_function
-from builtins import object, range
 
 import re
 import copy
 from evennia.utils.evtable import EvCell, EvTable
-from evennia.utils.utils import all_from_module, to_str, to_unicode
+from evennia.utils.utils import all_from_module, to_str, is_iter
 from evennia.utils.ansi import ANSIString
 
 # non-valid form-identifying characters (which can thus be
@@ -153,18 +145,34 @@ INVALID_FORMCHARS = r"\s\/\|\\\*\_\-\#\<\>\~\^\:\;\.\,"
 _ANSI_ESCAPE = re.compile(r"\|\|")
 
 
+def _to_rect(lines):
+    """
+    Forces all lines to be as long as the longest
+
+    Args:
+        lines (list): list of `ANSIString`s
+
+    Returns:
+        (list): list of `ANSIString`s of
+        same length as the longest input line
+
+    """
+    maxl = max(len(line) for line in lines)
+    return [line + " " * (maxl - len(line)) for line in lines]
+
+
 def _to_ansi(obj, regexable=False):
     "convert to ANSIString"
-    if isinstance(obj, basestring):
+    if isinstance(obj, str):
         # since ansi will be parsed twice (here and in the normal ansi send), we have to
         # escape the |-structure twice.
         obj = _ANSI_ESCAPE.sub(r"||||", obj)
     if isinstance(obj, dict):
         return dict((key, _to_ansi(value, regexable=regexable)) for key, value in obj.items())
-    elif hasattr(obj, "__iter__"):
+    elif is_iter(obj):
         return [_to_ansi(o) for o in obj]
     else:
-        return ANSIString(to_unicode(obj), regexable=regexable)
+        return ANSIString(obj, regexable=regexable)
 
 
 class EvForm(object):
@@ -184,7 +192,7 @@ class EvForm(object):
             filename (str): Path to template file.
             cells (dict): A dictionary mapping of {id:text}
             tables (dict): A dictionary mapping of {id:EvTable}.
-            form (dict): A dictionary of {"CELLCHAR":char,
+            form (dict): A dictionary of {"FORMCHAR":char,
                                           "TABLECHAR":char,
                                           "FORM":templatestring}
                     if this is given, filename is not read.
@@ -196,8 +204,12 @@ class EvForm(object):
         self.filename = filename
         self.input_form_dict = form
 
-        self.cells_mapping = dict((to_str(key, force_string=True), value) for key, value in cells.items()) if cells else {}
-        self.tables_mapping = dict((to_str(key, force_string=True), value) for key, value in tables.items()) if tables else {}
+        self.cells_mapping = (
+            dict((to_str(key), value) for key, value in cells.items()) if cells else {}
+        )
+        self.tables_mapping = (
+            dict((to_str(key), value) for key, value in tables.items()) if tables else {}
+        )
 
         self.cellchar = "x"
         self.tablechar = "c"
@@ -234,8 +246,12 @@ class EvForm(object):
         table_coords = {}
 
         # Locate the identifier tags and the horizontal end coords for all forms
-        re_cellchar = re.compile(r"%s+([^%s%s]+)%s+" % (cellchar, INVALID_FORMCHARS, cellchar, cellchar))
-        re_tablechar = re.compile(r"%s+([^%s%s|+])%s+" % (tablechar, INVALID_FORMCHARS, tablechar, tablechar))
+        re_cellchar = re.compile(
+            r"%s+([^%s%s]+)%s+" % (cellchar, INVALID_FORMCHARS, cellchar, cellchar)
+        )
+        re_tablechar = re.compile(
+            r"%s+([^%s%s|+])%s+" % (tablechar, INVALID_FORMCHARS, tablechar, tablechar)
+        )
         for iy, line in enumerate(_to_ansi(form, regexable=True)):
             # find cells
             ix0 = 0
@@ -260,7 +276,6 @@ class EvForm(object):
 
         # get rectangles and assign EvCells
         for key, (iy, leftix, rightix) in cell_coords.items():
-
             # scan up to find top of rectangle
             dy_up = 0
             if iy > 0:
@@ -288,11 +303,25 @@ class EvForm(object):
             data = self.cells_mapping.get(key, "")
             # if key == "1":
 
-            options = {"pad_left": 0, "pad_right": 0, "pad_top": 0, "pad_bottom": 0, "align": "l", "valign": "t", "enforce_size": True}
+            options = {
+                "pad_left": 0,
+                "pad_right": 0,
+                "pad_top": 0,
+                "pad_bottom": 0,
+                "align": "l",
+                "valign": "t",
+                "enforce_size": True,
+            }
             options.update(custom_options)
             # if key=="4":
 
-            mapping[key] = (iyup, leftix, width, height, EvCell(data, width=width, height=height, **options))
+            mapping[key] = (
+                iyup,
+                leftix,
+                width,
+                height,
+                EvCell(data, width=width, height=height, **options),
+            )
 
         # get rectangles and assign Tables
         for key, (iy, leftix, rightix) in table_coords.items():
@@ -323,8 +352,15 @@ class EvForm(object):
             # we have all the coordinates we need. Create Table.
             table = self.tables_mapping.get(key, None)
 
-            options = {"pad_left": 0, "pad_right": 0, "pad_top": 0, "pad_bottom": 0,
-                       "align": "l", "valign": "t", "enforce_size": True}
+            options = {
+                "pad_left": 0,
+                "pad_right": 0,
+                "pad_top": 0,
+                "pad_bottom": 0,
+                "align": "l",
+                "valign": "t",
+                "enforce_size": True,
+            }
             options.update(custom_options)
 
             if table:
@@ -347,7 +383,7 @@ class EvForm(object):
             for il, rectline in enumerate(rect):
                 formline = form[iy0 + il]
                 # insert new content, replacing old
-                form[iy0 + il] = formline[:ix0] + rectline + formline[ix0 + width:]
+                form[iy0 + il] = formline[:ix0] + rectline + formline[ix0 + width :]
         return form
 
     def map(self, cells=None, tables=None, **kwargs):
@@ -368,8 +404,8 @@ class EvForm(object):
         kwargs.pop("width", None)
         kwargs.pop("height", None)
 
-        new_cells = dict((to_str(key, force_string=True), value) for key, value in cells.items()) if cells else {}
-        new_tables = dict((to_str(key, force_string=True), value) for key, value in tables.items()) if tables else {}
+        new_cells = dict((to_str(key), value) for key, value in cells.items()) if cells else {}
+        new_tables = dict((to_str(key), value) for key, value in tables.items()) if tables else {}
 
         self.cells_mapping.update(new_cells)
         self.tables_mapping.update(new_tables)
@@ -408,23 +444,23 @@ class EvForm(object):
         self.tablechar = tablechar[0] if len(tablechar) > 1 else tablechar
 
         # split into a list of list of lines. Form can be indexed with form[iy][ix]
-        self.raw_form = _to_ansi(to_unicode(datadict.get("FORM", "")).split("\n"))
+        raw_form = _to_ansi(datadict.get("FORM", "").split("\n"))
+        self.raw_form = _to_rect(raw_form)
+
         # strip first line
         self.raw_form = self.raw_form[1:] if self.raw_form else self.raw_form
 
         self.options.update(kwargs)
 
         # parse and replace
-        self.mapping = self._parse_rectangles(self.cellchar, self.tablechar, self.raw_form, **kwargs)
+        self.mapping = self._parse_rectangles(
+            self.cellchar, self.tablechar, self.raw_form, **kwargs
+        )
         self.form = self._populate_form(self.raw_form, self.mapping)
 
     def __str__(self):
         "Prints the form"
-        return ANSIString("\n").join([line for line in self.form])
-
-    def __unicode__(self):
-        "prints the form"
-        return unicode(ANSIString("\n").join([line for line in self.form]))
+        return str(ANSIString("\n").join([line for line in self.form]))
 
 
 def _test():
@@ -432,25 +468,33 @@ def _test():
     form = EvForm("evennia.utils.tests.data.evform_example")
 
     # add data to each tagged form cell
-    form.map(cells={"AA": "|gTom the Bouncer",
-                    2: "|yGriatch",
-                    3: "A sturdy fellow",
-                    4: 12,
-                    5: 10,
-                    6: 5,
-                    7: 18,
-                    8: 10,
-                    9: 3})
+    form.map(
+        cells={
+            "AA": "|gTom the Bouncer",
+            2: "|yGriatch",
+            3: "A sturdy fellow",
+            4: 12,
+            5: 10,
+            6: 5,
+            7: 18,
+            8: 10,
+            9: 3,
+            "F": "rev 1",
+        }
+    )
     # create the EvTables
-    tableA = EvTable("HP", "MV", "MP",
-                     table=[["**"], ["*****"], ["***"]],
-                     border="incols")
-    tableB = EvTable("Skill", "Value", "Exp",
-                     table=[["Shooting", "Herbalism", "Smithing"],
-                            [12, 14, 9], ["550/1200", "990/1400", "205/900"]],
-                     border="incols")
+    tableA = EvTable("HP", "MV", "MP", table=[["**"], ["*****"], ["***"]], border="incols")
+    tableB = EvTable(
+        "Skill",
+        "Value",
+        "Exp",
+        table=[
+            ["Shooting", "Herbalism", "Smithing"],
+            [12, 14, 9],
+            ["550/1200", "990/1400", "205/900"],
+        ],
+        border="incols",
+    )
     # add the tables to the proper ids in the form
-    form.map(tables={"A": tableA,
-                     "B": tableB})
-    # unicode is required since the example contains non-ascii characters
-    return unicode(form)
+    form.map(tables={"A": tableA, "B": tableB})
+    return str(form)

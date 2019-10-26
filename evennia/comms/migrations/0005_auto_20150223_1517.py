@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from __future__ import unicode_literals
+
 
 from django.db import migrations
 
@@ -17,10 +17,6 @@ def convert_channelnames(apps, schema_editor):
 
 class Migration(migrations.Migration):
 
-    dependencies = [
-        ('comms', '0004_auto_20150118_1631'),
-    ]
+    dependencies = [("comms", "0004_auto_20150118_1631")]
 
-    operations = [
-        migrations.RunPython(convert_channelnames),
-    ]
+    operations = [migrations.RunPython(convert_channelnames)]

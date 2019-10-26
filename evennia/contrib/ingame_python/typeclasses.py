@@ -1,8 +1,9 @@
 """
 Typeclasses for the in-game Python system.
 
-To use thm, one should inherit from these classes (EventObject,
-EventRoom, EventCharacter and EventExit).
+To use them, change your base typeclasses to inherit from the classes in this
+module (EventObject, EventRoom, EventCharacter and EventExit) instead of the
+default ones in evennia core.
 
 """
 
@@ -179,6 +180,11 @@ class EventCharacter(DefaultCharacter):
         "unpuppeted": (["character"], CHARACTER_UNPUPPETED),
     }
 
+    @lazy_property
+    def callbacks(self):
+        """Return the CallbackHandler."""
+        return CallbackHandler(self)
+
     def announce_move_from(self, destination, msg=None, mapping=None):
         """
         Called if the move is to be announced. This is
@@ -206,15 +212,16 @@ class EventCharacter(DefaultCharacter):
 
         # Get the exit from location to destination
         location = self.location
-        exits = [o for o in location.contents if o.location is location and o.destination is destination]
+        exits = [
+            o for o in location.contents if o.location is location and o.destination is destination
+        ]
         mapping = mapping or {}
-        mapping.update({
-            "character": self,
-        })
+        mapping.update({"character": self})
 
         if exits:
-            exits[0].callbacks.call("msg_leave", self, exits[0],
-                                    location, destination, string, mapping)
+            exits[0].callbacks.call(
+                "msg_leave", self, exits[0], location, destination, string, mapping
+            )
             string = exits[0].callbacks.get_variable("message")
             mapping = exits[0].callbacks.get_variable("mapping")
 
@@ -223,7 +230,7 @@ class EventCharacter(DefaultCharacter):
         if not string:
             return
 
-        super(EventCharacter, self).announce_move_from(destination, msg=string, mapping=mapping)
+        super().announce_move_from(destination, msg=string, mapping=mapping)
 
     def announce_move_to(self, source_location, msg=None, mapping=None):
         """
@@ -261,15 +268,18 @@ class EventCharacter(DefaultCharacter):
         destination = self.location
         exits = []
         mapping = mapping or {}
-        mapping.update({
-            "character": self,
-        })
+        mapping.update({"character": self})
 
         if origin:
-            exits = [o for o in destination.contents if o.location is destination and o.destination is origin]
+            exits = [
+                o
+                for o in destination.contents
+                if o.location is destination and o.destination is origin
+            ]
             if exits:
-                exits[0].callbacks.call("msg_arrive", self, exits[0],
-                                        origin, destination, string, mapping)
+                exits[0].callbacks.call(
+                    "msg_arrive", self, exits[0], origin, destination, string, mapping
+                )
                 string = exits[0].callbacks.get_variable("message")
                 mapping = exits[0].callbacks.get_variable("mapping")
 
@@ -278,7 +288,7 @@ class EventCharacter(DefaultCharacter):
         if not string:
             return
 
-        super(EventCharacter, self).announce_move_to(source_location, msg=string, mapping=mapping)
+        super().announce_move_to(source_location, msg=string, mapping=mapping)
 
     def at_before_move(self, destination):
         """
@@ -299,14 +309,16 @@ class EventCharacter(DefaultCharacter):
         origin = self.location
         Room = DefaultRoom
         if isinstance(origin, Room) and isinstance(destination, Room):
-            can = self.callbacks.call("can_move", self,
-                                      origin, destination)
+            can = self.callbacks.call("can_move", self, origin, destination)
             if can:
                 can = origin.callbacks.call("can_move", self, origin)
                 if can:
                     # Call other character's 'can_part' event
-                    for present in [o for o in origin.contents if isinstance(
-                            o, DefaultCharacter) and o is not self]:
+                    for present in [
+                        o
+                        for o in origin.contents
+                        if isinstance(o, DefaultCharacter) and o is not self
+                    ]:
                         can = present.callbacks.call("can_part", present, self)
                         if not can:
                             break
@@ -328,7 +340,7 @@ class EventCharacter(DefaultCharacter):
             source_location (Object): Wwhere we came from. This may be `None`.
 
         """
-        super(EventCharacter, self).at_after_move(source_location)
+        super().at_after_move(source_location)
 
         origin = source_location
         destination = self.location
@@ -338,8 +350,9 @@ class EventCharacter(DefaultCharacter):
             destination.callbacks.call("move", self, origin, destination)
 
             # Call the 'greet' event of characters in the location
-            for present in [o for o in destination.contents if isinstance(
-                    o, DefaultCharacter) and o is not self]:
+            for present in [
+                o for o in destination.contents if isinstance(o, DefaultCharacter) and o is not self
+            ]:
                 present.callbacks.call("greet", present, self)
 
     def at_object_delete(self):
@@ -367,7 +380,7 @@ class EventCharacter(DefaultCharacter):
             puppeting this Object.
 
         """
-        super(EventCharacter, self).at_post_puppet()
+        super().at_post_puppet()
 
         self.callbacks.call("puppeted", self)
 
@@ -395,7 +408,7 @@ class EventCharacter(DefaultCharacter):
         if location and isinstance(location, DefaultRoom):
             location.callbacks.call("unpuppeted_in", self, location)
 
-        super(EventCharacter, self).at_pre_unpuppet()
+        super().at_pre_unpuppet()
 
     def at_before_say(self, message, **kwargs):
         """
@@ -421,7 +434,11 @@ class EventCharacter(DefaultCharacter):
         """
         # First, try the location
         location = getattr(self, "location", None)
-        location = location if location and inherits_from(location, "evennia.objects.objects.DefaultRoom") else None
+        location = (
+            location
+            if location and inherits_from(location, "evennia.objects.objects.DefaultRoom")
+            else None
+        )
         if location and not kwargs.get("whisper", False):
             allow = location.callbacks.call("can_say", self, location, message, parameters=message)
             message = location.callbacks.get_variable("message")
@@ -430,7 +447,9 @@ class EventCharacter(DefaultCharacter):
 
             # Browse all the room's other characters
             for obj in location.contents:
-                if obj is self or not inherits_from(obj, "objects.objects.DefaultCharacter"):
+                if obj is self or not inherits_from(
+                    obj, "evennia.objects.objects.DefaultCharacter"
+                ):
                     continue
 
                 allow = obj.callbacks.call("can_say", self, obj, message, parameters=message)
@@ -482,16 +501,24 @@ class EventCharacter(DefaultCharacter):
 
         """
 
-        super(EventCharacter, self).at_say(message, **kwargs)
+        super().at_say(message, **kwargs)
         location = getattr(self, "location", None)
-        location = location if location and inherits_from(location, "evennia.objects.objects.DefaultRoom") else None
+        location = (
+            location
+            if location and inherits_from(location, "evennia.objects.objects.DefaultRoom")
+            else None
+        )
 
         if location and not kwargs.get("whisper", False):
-            location.callbacks.call("say", self, location, message,
-                  parameters=message)
+            location.callbacks.call("say", self, location, message, parameters=message)
 
             # Call the other characters' "say" event
-            presents = [obj for obj in location.contents if obj is not self and inherits_from(obj, "objects.objects.DefaultCharacter")]
+            presents = [
+                obj
+                for obj in location.contents
+                if obj is not self
+                and inherits_from(obj, "evennia.objects.objects.DefaultCharacter")
+            ]
             for present in presents:
                 present.callbacks.call("say", self, present, message, parameters=message)
 
@@ -596,11 +623,22 @@ class EventExit(DefaultExit):
 
     _events = {
         "can_traverse": (["character", "exit", "room"], EXIT_CAN_TRAVERSE),
-        "msg_arrive": (["character", "exit", "origin", "destination", "message", "mapping"], EXIT_MSG_ARRIVE),
-        "msg_leave": (["character", "exit", "origin", "destination", "message", "mapping"], EXIT_MSG_LEAVE),
+        "msg_arrive": (
+            ["character", "exit", "origin", "destination", "message", "mapping"],
+            EXIT_MSG_ARRIVE,
+        ),
+        "msg_leave": (
+            ["character", "exit", "origin", "destination", "message", "mapping"],
+            EXIT_MSG_LEAVE,
+        ),
         "time": (["exit"], EXIT_TIME, None, time_event),
         "traverse": (["character", "exit", "origin", "destination"], EXIT_TRAVERSE),
     }
+
+    @lazy_property
+    def callbacks(self):
+        """Return the CallbackHandler."""
+        return CallbackHandler(self)
 
     def at_traverse(self, traversing_object, target_location):
         """
@@ -619,17 +657,17 @@ class EventExit(DefaultExit):
         """
         is_character = inherits_from(traversing_object, DefaultCharacter)
         if is_character:
-            allow = self.callbacks.call("can_traverse", traversing_object,
-                                        self, self.location)
+            allow = self.callbacks.call("can_traverse", traversing_object, self, self.location)
             if not allow:
                 return
 
-        super(EventExit, self).at_traverse(traversing_object, target_location)
+        super().at_traverse(traversing_object, target_location)
 
         # After traversing
         if is_character:
-            self.callbacks.call("traverse", traversing_object,
-                                self, self.location, self.destination)
+            self.callbacks.call(
+                "traverse", traversing_object, self, self.location, self.destination
+            )
 
 
 # Object help
@@ -703,7 +741,7 @@ class EventObject(DefaultObject):
             permissions for that.
 
         """
-        super(EventObject, self).at_get(getter)
+        super().at_get(getter)
         self.callbacks.call("get", getter, self)
 
     def at_drop(self, dropper):
@@ -719,7 +757,7 @@ class EventObject(DefaultObject):
             permissions from that.
 
         """
-        super(EventObject, self).at_drop(dropper)
+        super().at_drop(dropper)
         self.callbacks.call("drop", dropper, self)
 
 
@@ -861,6 +899,11 @@ class EventRoom(DefaultRoom):
         "time": (["room"], ROOM_TIME, None, time_event),
         "unpuppeted_in": (["character", "room"], ROOM_UNPUPPETED_IN),
     }
+
+    @lazy_property
+    def callbacks(self):
+        """Return the CallbackHandler."""
+        return CallbackHandler(self)
 
     def at_object_delete(self):
         """

@@ -3,7 +3,7 @@ Bots are a special child typeclasses of
 Account that are  controlled by the server.
 
 """
-from __future__ import print_function
+
 import time
 from django.conf import settings
 from evennia.accounts.accounts import DefaultAccount
@@ -15,11 +15,14 @@ _IDLE_TIMEOUT = settings.IDLE_TIMEOUT
 
 _IRC_ENABLED = settings.IRC_ENABLED
 _RSS_ENABLED = settings.RSS_ENABLED
+_GRAPEVINE_ENABLED = settings.GRAPEVINE_ENABLED
+
 
 _SESSIONS = None
 
 
 # Bot helper utilities
+
 
 class BotStarter(DefaultScript):
     """
@@ -78,6 +81,7 @@ class BotStarter(DefaultScript):
         """
         self.db.started = False
 
+
 #
 # Bot base class
 
@@ -98,11 +102,13 @@ class Bot(DefaultAccount):
         # the text encoding to use.
         self.db.encoding = "utf-8"
         # A basic security setup (also avoid idle disconnects)
-        lockstring = "examine:perm(Admin);edit:perm(Admin);delete:perm(Admin);" \
-                     "boot:perm(Admin);msg:false();noidletimeout:true()"
+        lockstring = (
+            "examine:perm(Admin);edit:perm(Admin);delete:perm(Admin);"
+            "boot:perm(Admin);msg:false();noidletimeout:true()"
+        )
         self.locks.add(lockstring)
         # set the basics of being a bot
-        script_key = "%s" % self.key
+        script_key = str(self.key)
         self.scripts.add(BotStarter, key=script_key)
         self.is_bot = True
 
@@ -118,14 +124,14 @@ class Bot(DefaultAccount):
         Evennia -> outgoing protocol
 
         """
-        super(Bot, self).msg(text=text, from_obj=from_obj, session=session, options=options, **kwargs)
+        super().msg(text=text, from_obj=from_obj, session=session, options=options, **kwargs)
 
     def execute_cmd(self, raw_string, session=None):
         """
         Incoming protocol -> Evennia
 
         """
-        super(Bot, self).msg(raw_string, session=session)
+        super().msg(raw_string, session=session)
 
     def at_server_shutdown(self):
         """
@@ -141,13 +147,25 @@ class Bot(DefaultAccount):
 
 # IRC
 
+
 class IRCBot(Bot):
     """
     Bot for handling IRC connections.
 
     """
 
-    def start(self, ev_channel=None, irc_botname=None, irc_channel=None, irc_network=None, irc_port=None, irc_ssl=None):
+    # override this on a child class to use custom factory
+    factory_path = "evennia.server.portal.irc.IRCBotFactory"
+
+    def start(
+        self,
+        ev_channel=None,
+        irc_botname=None,
+        irc_channel=None,
+        irc_network=None,
+        irc_port=None,
+        irc_ssl=None,
+    ):
         """
         Start by telling the portal to start a new session.
 
@@ -182,7 +200,7 @@ class IRCBot(Bot):
             # connect to Evennia channel
             channel = search.channel_search(ev_channel)
             if not channel:
-                raise RuntimeError("Evennia Channel '%s' not found." % ev_channel)
+                raise RuntimeError(f"Evennia Channel '{ev_channel}' not found.")
             channel = channel[0]
             channel.connect(self)
             self.db.ev_channel = channel
@@ -197,13 +215,15 @@ class IRCBot(Bot):
 
         # instruct the server and portal to create a new session with
         # the stored configuration
-        configdict = {"uid": self.dbid,
-                      "botname": self.db.irc_botname,
-                      "channel": self.db.irc_channel,
-                      "network": self.db.irc_network,
-                      "port": self.db.irc_port,
-                      "ssl": self.db.irc_ssl}
-        _SESSIONS.start_bot_session("evennia.server.portal.irc.IRCBotFactory", configdict)
+        configdict = {
+            "uid": self.dbid,
+            "botname": self.db.irc_botname,
+            "channel": self.db.irc_channel,
+            "network": self.db.irc_network,
+            "port": self.db.irc_port,
+            "ssl": self.db.irc_ssl,
+        }
+        _SESSIONS.start_bot_session(self.factory_path, configdict)
 
     def at_msg_send(self, **kwargs):
         "Shortcut here or we can end up in infinite loop"
@@ -226,7 +246,7 @@ class IRCBot(Bot):
         if not hasattr(self, "_nicklist_callers"):
             self._nicklist_callers = []
         self._nicklist_callers.append(caller)
-        super(IRCBot, self).msg(request_nicklist="")
+        super().msg(request_nicklist="")
         return
 
     def ping(self, caller):
@@ -240,7 +260,7 @@ class IRCBot(Bot):
         if not hasattr(self, "_ping_callers"):
             self._ping_callers = []
         self._ping_callers.append(caller)
-        super(IRCBot, self).msg(ping="")
+        super().msg(ping="")
 
     def reconnect(self):
         """
@@ -248,7 +268,7 @@ class IRCBot(Bot):
         having to destroy/recreate the bot "account".
 
         """
-        super(IRCBot, self).msg(reconnect="")
+        super().msg(reconnect="")
 
     def msg(self, text=None, **kwargs):
         """
@@ -265,12 +285,18 @@ class IRCBot(Bot):
         """
         from_obj = kwargs.get("from_obj", None)
         options = kwargs.get("options", None) or {}
+
         if not self.ndb.ev_channel and self.db.ev_channel:
             # cache channel lookup
             self.ndb.ev_channel = self.db.ev_channel
-        if "from_channel" in options and text and self.ndb.ev_channel.dbid == options["from_channel"]:
+
+        if (
+            "from_channel" in options
+            and text
+            and self.ndb.ev_channel.dbid == options["from_channel"]
+        ):
             if not from_obj or from_obj != [self]:
-                super(IRCBot, self).msg(channel=text)
+                super().msg(channel=text)
 
     def execute_cmd(self, session=None, txt=None, **kwargs):
         """
@@ -284,31 +310,34 @@ class IRCBot(Bot):
         Kwargs:
             user (str): The name of the user who sent the message.
             channel (str): The name of channel the message was sent to.
-            type (str): Nature of message. Either 'msg', 'action', 'nicklist' or 'ping'.
-            nicklist (list, optional): Set if `type='nicklist'`. This is a list of nicks returned by calling
-                the `self.get_nicklist`. It must look for a list `self._nicklist_callers`
-                which will contain all callers waiting for the nicklist.
-            timings (float, optional): Set if `type='ping'`. This is the return (in seconds) of a
-                ping request triggered with `self.ping`. The return must look for a list
-                `self._ping_callers` which will contain all callers waiting for the ping return.
+            type (str): Nature of message. Either 'msg', 'action', 'nicklist'
+                or 'ping'.
+            nicklist (list, optional): Set if `type='nicklist'`. This is a list
+                of nicks returned by calling the `self.get_nicklist`. It must look
+                for a list `self._nicklist_callers` which will contain all callers
+                waiting for the nicklist.
+            timings (float, optional): Set if `type='ping'`. This is the return
+                (in seconds) of a ping request triggered with `self.ping`. The
+                return must look for a list `self._ping_callers` which will contain
+                all callers waiting for the ping return.
 
         """
         if kwargs["type"] == "nicklist":
             # the return of a nicklist request
             if hasattr(self, "_nicklist_callers") and self._nicklist_callers:
-                chstr = "%s (%s:%s)" % (self.db.irc_channel, self.db.irc_network, self.db.irc_port)
+                chstr = f"{self.db.irc_channel} ({self.db.irc_network}:{self.db.irc_port})"
                 nicklist = ", ".join(sorted(kwargs["nicklist"], key=lambda n: n.lower()))
                 for obj in self._nicklist_callers:
-                    obj.msg("Nicks at %s:\n %s" % (chstr, nicklist))
+                    obj.msg(f"Nicks at {chstr}:\n {nicklist}")
                 self._nicklist_callers = []
             return
 
         elif kwargs["type"] == "ping":
             # the return of a ping
             if hasattr(self, "_ping_callers") and self._ping_callers:
-                chstr = "%s (%s:%s)" % (self.db.irc_channel, self.db.irc_network, self.db.irc_port)
+                chstr = f"{self.db.irc_channel} ({self.db.irc_network}:{self.db.irc_port})"
                 for obj in self._ping_callers:
-                    obj.msg("IRC ping return from %s took %ss." % (chstr, kwargs["timing"]))
+                    obj.msg(f"IRC ping return from {chstr} took {kwargs['timing']}s.")
                 self._ping_callers = []
             return
 
@@ -327,30 +356,37 @@ class IRCBot(Bot):
                     delta_cmd = t0 - sess.cmd_last_visible
                     delta_conn = t0 - session.conn_time
                     account = sess.get_account()
-                    whos.append("%s (%s/%s)" % (utils.crop("|w%s|n" % account.name, width=25),
-                                                utils.time_format(delta_conn, 0),
-                                                utils.time_format(delta_cmd, 1)))
-                text = "Who list (online/idle): %s" % ", ".join(sorted(whos, key=lambda w: w.lower()))
+                    whos.append(
+                        "%s (%s/%s)"
+                        % (
+                            utils.crop("|w%s|n" % account.name, width=25),
+                            utils.time_format(delta_conn, 0),
+                            utils.time_format(delta_cmd, 1),
+                        )
+                    )
+                text = f"Who list (online/idle): {', '.join(sorted(whos, key=lambda w: w.lower()))}"
             elif txt.lower().startswith("about"):
                 # some bot info
-                text = "This is an Evennia IRC bot connecting from '%s'." % settings.SERVERNAME
+                text = f"This is an Evennia IRC bot connecting from '{settings.SERVERNAME}'."
             else:
                 text = "I understand 'who' and 'about'."
-            super(IRCBot, self).msg(privmsg=((text,), {"user": user}))
+            super().msg(privmsg=((text,), {"user": user}))
         else:
             # something to send to the main channel
             if kwargs["type"] == "action":
                 # An action (irc pose)
-                text = "%s@%s %s" % (kwargs["user"], kwargs["channel"], txt)
+                text = f"{kwargs['user']}@{kwargs['channel']} {txt}"
             else:
                 # msg - A normal channel message
-                text = "%s@%s: %s" % (kwargs["user"], kwargs["channel"], txt)
+                text = f"{kwargs['user']}@{kwargs['channel']}: {txt}"
 
             if not self.ndb.ev_channel and self.db.ev_channel:
                 # cache channel lookup
                 self.ndb.ev_channel = self.db.ev_channel
+
             if self.ndb.ev_channel:
                 self.ndb.ev_channel.msg(text, senders=self)
+
 
 #
 # RSS
@@ -389,7 +425,7 @@ class RSSBot(Bot):
             # connect to Evennia channel
             channel = search.channel_search(ev_channel)
             if not channel:
-                raise RuntimeError("Evennia Channel '%s' not found." % ev_channel)
+                raise RuntimeError(f"Evennia Channel '{ev_channel}' not found.")
             channel = channel[0]
             self.db.ev_channel = channel
         if rss_url:
@@ -398,9 +434,7 @@ class RSSBot(Bot):
             self.db.rss_rate = rss_rate
         # instruct the server and portal to create a new session with
         # the stored configuration
-        configdict = {"uid": self.dbid,
-                      "url": self.db.rss_url,
-                      "rate": self.db.rss_rate}
+        configdict = {"uid": self.dbid, "url": self.db.rss_url, "rate": self.db.rss_rate}
         _SESSIONS.start_bot_session("evennia.server.portal.rss.RSSBotFactory", configdict)
 
     def execute_cmd(self, txt=None, session=None, **kwargs):
@@ -421,3 +455,118 @@ class RSSBot(Bot):
             self.ndb.ev_channel = self.db.ev_channel
         if self.ndb.ev_channel:
             self.ndb.ev_channel.msg(txt, senders=self.id)
+
+
+# Grapevine bot
+
+
+class GrapevineBot(Bot):
+    """
+    g Grapevine (https://grapevine.haus) relayer. The channel to connect to is the first
+    name in the settings.GRAPEVINE_CHANNELS list.
+
+    """
+
+    factory_path = "evennia.server.portal.grapevine.RestartingWebsocketServerFactory"
+
+    def start(self, ev_channel=None, grapevine_channel=None):
+        """
+        Start by telling the portal to connect to the grapevine network.
+
+        """
+        if not _GRAPEVINE_ENABLED:
+            self.delete()
+            return
+
+        global _SESSIONS
+        if not _SESSIONS:
+            from evennia.server.sessionhandler import SESSIONS as _SESSIONS
+
+        # connect to Evennia channel
+        if ev_channel:
+            # connect to Evennia channel
+            channel = search.channel_search(ev_channel)
+            if not channel:
+                raise RuntimeError(f"Evennia Channel '{ev_channel}' not found.")
+            channel = channel[0]
+            channel.connect(self)
+            self.db.ev_channel = channel
+
+        if grapevine_channel:
+            self.db.grapevine_channel = grapevine_channel
+
+        # these will be made available as properties on the protocol factory
+        configdict = {"uid": self.dbid, "grapevine_channel": self.db.grapevine_channel}
+
+        _SESSIONS.start_bot_session(self.factory_path, configdict)
+
+    def at_msg_send(self, **kwargs):
+        "Shortcut here or we can end up in infinite loop"
+        pass
+
+    def msg(self, text=None, **kwargs):
+        """
+        Takes text from connected channel (only).
+
+        Args:
+            text (str, optional): Incoming text from channel.
+
+        Kwargs:
+            options (dict): Options dict with the following allowed keys:
+                - from_channel (str): dbid of a channel this text originated from.
+                - from_obj (list): list of objects sending this text.
+
+        """
+        from_obj = kwargs.get("from_obj", None)
+        options = kwargs.get("options", None) or {}
+
+        if not self.ndb.ev_channel and self.db.ev_channel:
+            # cache channel lookup
+            self.ndb.ev_channel = self.db.ev_channel
+
+        if (
+            "from_channel" in options
+            and text
+            and self.ndb.ev_channel.dbid == options["from_channel"]
+        ):
+            if not from_obj or from_obj != [self]:
+                # send outputfunc channel(msg, chan, sender)
+
+                # TODO we should refactor channel formatting to operate on the
+                # account/object level instead. For now, remove the channel/name
+                # prefix since we pass that explicitly anyway
+                prefix, text = text.split(":", 1)
+
+                super().msg(
+                    channel=(
+                        text.strip(),
+                        self.db.grapevine_channel,
+                        ", ".join(obj.key for obj in from_obj),
+                        {},
+                    )
+                )
+
+    def execute_cmd(
+        self,
+        txt=None,
+        session=None,
+        event=None,
+        grapevine_channel=None,
+        sender=None,
+        game=None,
+        **kwargs,
+    ):
+        """
+        Take incoming data from protocol and send it to connected channel. This is
+        triggered by the bot_data_in Inputfunc.
+        """
+        if event == "channels/broadcast":
+            # A private message to the bot - a command.
+
+            text = f"{sender}@{game}: {txt}"
+
+            if not self.ndb.ev_channel and self.db.ev_channel:
+                # simple cache of channel lookup
+                self.ndb.ev_channel = self.db.ev_channel
+            if self.ndb.ev_channel:
+                self.ndb.ev_channel.msg(text, senders=self)

@@ -1,19 +1,20 @@
 """
-This implements resources for twisted webservers using the wsgi
-interface of django. This alleviates the need of running e.g. an
-apache server to serve Evennia's web presence (although you could do
+This implements resources for Twisted webservers using the WSGI
+interface of Django. This alleviates the need of running e.g. an
+Apache server to serve Evennia's web presence (although you could do
 that too if desired).
 
 The actual servers are started inside server.py as part of the Evennia
 application.
 
-(Lots of thanks to http://githup.com/clemensha/twisted-wsgi-django for
+(Lots of thanks to http://github.com/clemesha/twisted-wsgi-django for
 a great example/aid on how to do this.)
 
+
 """
-import urlparse
-from urllib import quote as urlquote
-from twisted.web import resource, http, server
+import urllib.parse
+from urllib.parse import quote as urlquote
+from twisted.web import resource, http, server, static
 from twisted.internet import reactor
 from twisted.application import internet
 from twisted.web.proxy import ReverseProxyResource
@@ -23,7 +24,8 @@ from twisted.internet import defer
 
 from twisted.web.wsgi import WSGIResource
 from django.conf import settings
-from django.core.handlers.wsgi import WSGIHandler
+from django.core.wsgi import get_wsgi_application
+
 
 from evennia.utils import logger
 
@@ -56,6 +58,7 @@ class LockableThreadPool(threadpool.ThreadPool):
 # X-Forwarded-For Handler
 #
 
+
 class HTTPChannelWithXForwardedFor(http.HTTPChannel):
     """
     HTTP xforward class
@@ -71,9 +74,9 @@ class HTTPChannelWithXForwardedFor(http.HTTPChannel):
         http.HTTPChannel.allHeadersReceived(self)
         req = self.requests[-1]
         client_ip, port = self.transport.client
-        proxy_chain = req.getHeader('X-FORWARDED-FOR')
+        proxy_chain = req.getHeader("X-FORWARDED-FOR")
         if proxy_chain and client_ip in _UPSTREAM_IPS:
-            forwarded = proxy_chain.split(', ', 1)[CLIENT]
+            forwarded = proxy_chain.split(", ", 1)[CLIENT]
             self.transport.client = (forwarded, port)
 
 
@@ -98,10 +101,11 @@ class EvenniaReverseProxyResource(ReverseProxyResource):
 
         """
         request.notifyFinish().addErrback(
-                lambda f: logger.log_trace("%s\nCaught errback in webserver.py:75." % f))
+            lambda f: logger.log_trace("%s\nCaught errback in webserver.py:75." % f)
+        )
         return EvenniaReverseProxyResource(
-            self.host, self.port, self.path + '/' + urlquote(path, safe=""),
-            self.reactor)
+            self.host, self.port, self.path + "/" + urlquote(path, safe=""), self.reactor
+        )
 
     def render(self, request):
         """
@@ -117,19 +121,26 @@ class EvenniaReverseProxyResource(ReverseProxyResource):
         # RFC 2616 tells us that we can omit the port if it's the default port,
         # but we have to provide it otherwise
         request.content.seek(0, 0)
-        qs = urlparse.urlparse(request.uri)[4]
+        qs = urllib.parse.urlparse(request.uri)[4]
         if qs:
-            rest = self.path + '?' + qs
+            rest = self.path + "?" + qs.decode()
         else:
             rest = self.path
+        rest = rest.encode()
         clientFactory = self.proxyClientFactoryClass(
-            request.method, rest, request.clientproto,
-            request.getAllHeaders(), request.content.read(), request)
+            request.method,
+            rest,
+            request.clientproto,
+            request.getAllHeaders(),
+            request.content.read(),
+            request,
+        )
         clientFactory.noisy = False
         self.reactor.connectTCP(self.host, self.port, clientFactory)
         # don't trigger traceback if connection is lost before request finish.
         request.notifyFinish().addErrback(
-                lambda f: logger.log_trace("%s\nCaught errback in webserver.py:75." % f))
+            lambda f: logger.log_trace("%s\nCaught errback in webserver.py:75." % f)
+        )
         return NOT_DONE_YET
 
 
@@ -156,8 +167,8 @@ class DjangoWebRoot(resource.Resource):
         self.pool = pool
         self._echo_log = True
         self._pending_requests = {}
-        resource.Resource.__init__(self)
-        self.wsgi_resource = WSGIResource(reactor, pool, WSGIHandler())
+        super().__init__()
+        self.wsgi_resource = WSGIResource(reactor, pool, get_wsgi_application())
 
     def empty_threadpool(self):
         """
@@ -175,7 +186,7 @@ class DjangoWebRoot(resource.Resource):
         return defer.DeferredList(self._pending_requests, consumeErrors=True)
 
     def _decrement_requests(self, *args, **kwargs):
-        self._pending_requests.pop(kwargs.get('deferred', None), None)
+        self._pending_requests.pop(kwargs.get("deferred", None), None)
 
     def getChild(self, path, request):
         """
@@ -206,11 +217,19 @@ class DjangoWebRoot(resource.Resource):
 # Site with deactivateable logging
 #
 
+
 class Website(server.Site):
     """
     This class will only log http requests if settings.DEBUG is True.
     """
+
     noisy = False
+
+    def logPrefix(self):
+        "How to be named in logs"
+        if hasattr(self, "is_portal") and self.is_portal:
+            return "Webserver-proxy"
+        return "Webserver"
 
     def log(self, request):
         """Conditional logging"""
@@ -221,6 +240,7 @@ class Website(server.Site):
 #
 # Threaded Webserver
 #
+
 
 class WSGIWebServer(internet.TCPServer):
     """
@@ -242,14 +262,14 @@ class WSGIWebServer(internet.TCPServer):
 
         """
         self.pool = pool
-        internet.TCPServer.__init__(self, *args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def startService(self):
         """
         Start the pool after the service starts.
 
         """
-        internet.TCPServer.startService(self)
+        super().startService()
         self.pool.start()
 
     def stopService(self):
@@ -257,5 +277,17 @@ class WSGIWebServer(internet.TCPServer):
         Safely stop the pool after the service stops.
 
         """
-        internet.TCPServer.stopService(self)
+        super().stopService()
         self.pool.stop()
+
+
+class PrivateStaticRoot(static.File):
+    """
+    This overrides the default static file resource so as to not make the
+    directory listings public (that is, if you go to /media or /static you
+    won't see an index of all static/media files on the server).
+
+    """
+
+    def directoryListing(self):
+        return resource.ForbiddenResource()
